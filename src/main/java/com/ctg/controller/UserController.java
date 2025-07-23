@@ -17,16 +17,16 @@ public class UserController {
 
     @GetMapping
     public PagedResponse<UserDto> getUsers(
-            @RequestParam(value = "pageNo",
-                    defaultValue = PaginationConstants.DEFAULT_PAGE_NUMBER, required = false) int pageNo,
-            @RequestParam(value = "pageSize",
-                    defaultValue = PaginationConstants.DEFAULT_PAGE_SIZE, required = false) int pageSize,
-            @RequestParam(value = "sortBy",
-                    defaultValue = PaginationConstants.DEFAULT_SORT_BY, required = false) String sortBy,
+            @RequestParam(value = "page",
+                    defaultValue = PaginationConstants.DEFAULT_PAGE_NUMBER, required = false) int page,
+            @RequestParam(value = "size",
+                    defaultValue = PaginationConstants.DEFAULT_PAGE_SIZE, required = false) int size,
+            @RequestParam(value = "sort",
+                    defaultValue = PaginationConstants.DEFAULT_SORT_BY, required = false) String sort,
             @RequestParam(value = "sortDir",
                     defaultValue = PaginationConstants.DEFAULT_SORT_DIR, required = false) String sortDir
     ) {
-       return userService.getPagedUsers(pageNo, pageSize, sortBy, sortDir);
+       return userService.getPagedUsers(page, size, sort, sortDir);
     }
 
     @GetMapping("/{id}")
@@ -36,7 +36,7 @@ public class UserController {
 
     @PostMapping
     public UserDto createNewUser(@RequestBody UserDto newUser) {
-        return userService.createNewUser(newUser);
+        return userService.createUser(newUser);
     }
 
     @PutMapping("/{id}")
