@@ -4,6 +4,7 @@ import com.ctg.constants.PaginationConstants;
 import com.ctg.dto.PagedResponse;
 import com.ctg.dto.UserDto;
 import com.ctg.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -35,12 +36,13 @@ public class UserController {
     }
 
     @PostMapping
-    public UserDto createNewUser(@RequestBody UserDto newUser) {
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserDto createNewUser(@Valid @RequestBody UserDto newUser) {
         return userService.createUser(newUser);
     }
 
     @PutMapping("/{id}")
-    public UserDto updateUser(@RequestBody UserDto updatedUser, @PathVariable("id") Long id) {
+    public UserDto updateUser(@Valid @RequestBody UserDto updatedUser, @PathVariable("id") Long id) {
         return userService.updateUser(updatedUser, id);
     }
 
