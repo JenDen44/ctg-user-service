@@ -3,6 +3,7 @@ package com.ctg.service;
 import com.ctg.dto.PagedResponse;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
+import com.ctg.model.ErrorField;
 import com.ctg.repository.UserRepository;
 import com.ctg.dto.UserDto;
 import com.ctg.mapper.UserMapper;
@@ -14,7 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Map;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -40,7 +41,7 @@ public class UserServiceImpl implements UserService {
     public UserDto createUser(@Valid UserDto userDto) {
         if (userRepository.existsByEmail(userDto.getEmail())) {
             log.error("Email already exists {}", userDto.getEmail());
-            throw new ValidationException(Map.of("email", "Email already exists"));
+            throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
         }
         var newUser = userRepository.save(userMapper.toEntity(userDto));
         log.debug("Created new user {}", newUser);
@@ -55,7 +56,7 @@ public class UserServiceImpl implements UserService {
                     if (!existingUser.getEmail().equals(userDto.getEmail())) {
                         if (userRepository.existsByEmail(userDto.getEmail())) {
                             log.error("Email already exists {}", userDto.getEmail());
-                            throw new ValidationException(Map.of("email", "Email already exists"));
+                            throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
                         }
                     }
                     userMapper.updateEntityFromDto(userDto, existingUser);
