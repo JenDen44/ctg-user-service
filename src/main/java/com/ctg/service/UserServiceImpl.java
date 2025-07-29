@@ -53,17 +53,16 @@ public class UserServiceImpl implements UserService {
     public UserDto updateUser(@Valid UserDto userDto, Long id) {
         return userRepository.findById(id)
                 .map(existingUser -> {
-                    if (!existingUser.getEmail().equals(userDto.getEmail())) {
-                        if (userRepository.existsByEmail(userDto.getEmail())) {
-                            log.error("Email already exists {}", userDto.getEmail());
-                            throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
-                        }
+                    if (!existingUser.getEmail().equals(userDto.getEmail())
+                            && userRepository.existsByEmail(userDto.getEmail())) {
+                        log.error("Email already exists {}", userDto.getEmail());
+                        throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
                     }
                     userMapper.updateEntityFromDto(userDto, existingUser);
-                    var updatedUser = userRepository.save(existingUser);
-                    log.debug("Newly updated user {}", updatedUser);
+                    userRepository.save(existingUser);
+                    log.debug("Newly updated user {}", existingUser);
 
-                    return userMapper.toDto(updatedUser);
+                    return userMapper.toDto(existingUser);
 
                 }).orElseThrow(() -> {
                     log.error("User not found with id {}", id);
