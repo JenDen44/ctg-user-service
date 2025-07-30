@@ -1,13 +1,14 @@
 package com.ctg.model;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 @Entity
 @Table(name = "users")
 @NoArgsConstructor
 @AllArgsConstructor
+@Setter
+@Getter
 public class User {
 
     @GeneratedValue(strategy = GenerationType.IDENTITY)
