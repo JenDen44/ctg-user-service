@@ -247,12 +247,6 @@ public class UserControllerIIT extends BaseIntegrationTest {
     @Test
     @DisplayName("PUT /users — invalid JSON (missing fields)")
     void updateUserInvalidJson() {
-        //TODO нужен ли кол в базу данных если данные json не валидные и все равно до бд не дойдет
-        jdbcTemplate.execute(
-                "INSERT INTO users (id, full_name, email, password, role) " +
-                        "VALUES (3, 'Old Name', 'old@mail.com', 'oldPassword', 'EMPLOYEE')"
-        );
-
         String json = """
         {
             "fullName": "Test User",
