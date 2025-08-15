@@ -12,6 +12,8 @@ import lombok.*;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
+@Builder
+@ToString
 public class UserDto {
 
     private Long id;
@@ -24,10 +26,8 @@ public class UserDto {
     @Email(message = "Email should be valid")
     private String email;
 
-
     @NotBlank(message = "Password is mandatory")
     @Size(min = 8, max = 100, message = "Password must be 8-100 characters")
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
     @NotNull(message = "Role is mandatory")
