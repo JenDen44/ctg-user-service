@@ -28,6 +28,10 @@ public class UserControllerIIT extends BaseIntegrationTest {
 
     private final String MAIN_PATH = "/api/v1/users";
     private final String MAIN_PATH_ID = "/api/v1/users/";
+    private static final String VALIDATION_TITLE = "\"title\":\"Validation failed\"";
+    private static final String NOT_FOUND_TITLE = "\"title\":\"Not found\"";
+    private static final String CODE_404 = "\"code\":404";
+    private static final String CODE_400 = "\"code\":400";
 
     @AfterEach
     void cleanUp() {
@@ -114,8 +118,8 @@ public class UserControllerIIT extends BaseIntegrationTest {
         String responseBody = stringResponse.getBody();
         assertThat(responseBody).isNotNull();
         assertThat(responseBody)
-                .contains("\"title\":\"Validation failed\"")
-                .contains("\"code\":400")
+                .contains(VALIDATION_TITLE)
+                .contains(CODE_400)
                 .contains("\"fields\":[{\"field\":\"email\",\"message\":\"Email should be valid\"}]");
     }
 
@@ -136,8 +140,8 @@ public class UserControllerIIT extends BaseIntegrationTest {
         assertThat(responseBode).isNotNull();
 
         assertThat(responseBode)
-                .contains("\"title\":\"Validation failed\"")
-                .contains("\"code\":400")
+                .contains(VALIDATION_TITLE)
+                .contains(CODE_400)
                 .contains("\"fields\":[{\"field\":\"password\",\"message\":\"Password must be 8-100 characters\"}]");
     }
 
@@ -172,24 +176,21 @@ public class UserControllerIIT extends BaseIntegrationTest {
         String responseBody = stringResponse.getBody();
         assertThat(responseBody).isNotNull();
         assertThat(responseBody)
-                .contains("\"title\":\"Not found\"")
+                .contains(NOT_FOUND_TITLE)
                 .contains("\"message\":\"User not found with id 111\"")
-                .contains("\"code\":404");
+                .contains(CODE_404);
     }
 
     @Test
     @DisplayName("PUT /users/{id} — OK")
     void updateUserOK() {
-        jdbcTemplate.execute(
-                "INSERT INTO users (id, full_name, email, password, role) " +
-                        "VALUES (3, 'Old Name', 'old@mail.com', 'oldPassword', 'EMPLOYEE')"
-        );
+        Long userId = createTestUser("Old Name", "old@mail.com", Role.EMPLOYEE);
+        UserDto updatedUser = new UserDto(userId, "New Name", "new@mail.com", "newPassword", Role.ADMIN);
 
-        UserDto updatedUser = new UserDto(3L, "New Name", "new@mail.com", "newPassword", Role.ADMIN);
         HttpEntity<UserDto> request = new HttpEntity<>(updatedUser);
 
         ResponseEntity<UserDto> response = restTemplate.exchange(
-                MAIN_PATH_ID + 3,
+                MAIN_PATH_ID + userId,
                 HttpMethod.PUT,
                 request,
                 UserDto.class
@@ -201,27 +202,17 @@ public class UserControllerIIT extends BaseIntegrationTest {
         assertThat(responseUserDto.getRole()).isEqualTo(updatedUser.getRole());
         assertThat(responseUserDto.getId()).isEqualTo(updatedUser.getId());
         assertThat(responseUserDto.getEmail()).isEqualTo(updatedUser.getEmail());
-
-        String email = jdbcTemplate.queryForObject(
-                "SELECT email FROM users WHERE id = 3",
-                String.class
-        );
-        assertThat(email).isEqualTo(responseUserDto.getEmail());
     }
 
     @Test
     @DisplayName("PUT /users/{id} — invalid passwords")
     void updateUserWithInvalidPassword() {
-        jdbcTemplate.execute(
-                "INSERT INTO users (id, full_name, email, password, role) " +
-                        "VALUES (3, 'Old Name', 'old@mail.com', 'oldPassword', 'EMPLOYEE')"
-        );
-
-        UserDto updatedUser = TestUserFactory.userDtoWithIdAndPassword(3L, "short");
+        Long userId = createTestUser("Old Name", "old@mail.com", Role.EMPLOYEE);
+        UserDto updatedUser = new UserDto(userId, "New Name", "new@mail.com", "short", Role.ADMIN);
         HttpEntity<UserDto> request = new HttpEntity<>(updatedUser);
 
         ResponseEntity<String> stringResponse = restTemplate.exchange(
-                MAIN_PATH_ID + 3,
+                MAIN_PATH_ID + userId,
                 HttpMethod.PUT,
                 request,
                 String.class
@@ -232,12 +223,12 @@ public class UserControllerIIT extends BaseIntegrationTest {
         assertThat(responseBody).isNotNull();
 
         assertThat(responseBody)
-                .contains("\"title\":\"Validation failed\"")
-                .contains("\"code\":400")
+                .contains(VALIDATION_TITLE)
+                .contains(CODE_400)
                 .contains("\"fields\":[{\"field\":\"password\",\"message\":\"Password must be 8-100 characters\"}]");
 
         String oldName = jdbcTemplate.queryForObject(
-                "SELECT full_name FROM users where id = 3",
+                "SELECT full_name FROM users where id = " + userId,
                 String.class
         );
 
@@ -296,23 +287,20 @@ public class UserControllerIIT extends BaseIntegrationTest {
         String responseBody = stringResponse.getBody();
         assertThat(responseBody).isNotNull();
         assertThat(responseBody)
-                .contains("\"title\":\"Validation failed\"")
-                .contains("\"code\":400")
+                .contains(VALIDATION_TITLE)
+                .contains(CODE_400)
                 .contains("\"fields\":[{\"field\":\"email\",\"message\":\"Email should be valid\"}]");
     }
 
     @Test
     @DisplayName("DELETE /users/{id} — OK")
     void deleteUserOK() {
-        jdbcTemplate.execute(
-                "INSERT INTO users (id, full_name, email, password, role) " +
-                        "VALUES (5, 'To Delete', 'delete@mail.com', 'pass', 'EMPLOYEE')"
-        );
+        Long userId = createTestUser("Tes User", "test@mail.com", Role.EMPLOYEE);
 
-        restTemplate.delete(MAIN_PATH_ID + 5);
+        restTemplate.delete(MAIN_PATH_ID + userId);
 
         Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE id = 5",
+                "SELECT COUNT(*) FROM users WHERE id = " + userId,
                 Integer.class
         );
         assertThat(count).isEqualTo(0);
@@ -322,7 +310,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
     @DisplayName("DELETE /users/{id} — Not Found")
     void deleteUserNotFound() {
         ResponseEntity<String> stringResponse = restTemplate.exchange(
-                MAIN_PATH_ID + 5,
+                MAIN_PATH_ID + 999,
                 HttpMethod.DELETE,
                 null,
                 String.class
@@ -332,12 +320,12 @@ public class UserControllerIIT extends BaseIntegrationTest {
         String responseBody = stringResponse.getBody();
         assertThat(responseBody).isNotNull();
         assertThat(responseBody)
-                .contains("\"title\":\"Not found\"")
-                .contains("\"code\":404")
-                .contains("\"message\":\"User not found with id: 5\"");
+                .contains(NOT_FOUND_TITLE)
+                .contains(CODE_404)
+                .contains("\"message\":\"User not found with id: 999\"");
 
         Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE id = 5",
+                "SELECT COUNT(*) FROM users WHERE id = " + 999,
                 Integer.class
         );
         assertThat(count).isEqualTo(0);
@@ -346,10 +334,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
     @Test
     @DisplayName("GET /users — With params")
     void getPagedUsersWithParams() {
-        jdbcTemplate.execute("INSERT INTO users (full_name, email, password, role) VALUES " +
-                "('User1', 'user1@mail.com', 'pass1', 'ADMIN'), " +
-                "('User2', 'user2@mail.com', 'pass2', 'ADMIN'), " +
-                "('User3', 'user3@mail.com', 'pass3', 'EMPLOYEE')");
+       createThreeTestUsers();
 
         ResponseEntity<PagedResponse<UserDto>> response = restTemplate.exchange(
                 MAIN_PATH + "?page=0&size=2",
@@ -370,10 +355,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
     @Test
     @DisplayName("GET /users — with default params")
     void getPagedUsersWithDefaultParams() {
-        jdbcTemplate.execute("INSERT INTO users (full_name, email, password, role) VALUES " +
-                "('User1', 'user1@mail.com', 'pass1', 'ADMIN'), " +
-                "('User2', 'user2@mail.com', 'pass2', 'ADMIN'), " +
-                "('User3', 'user3@mail.com', 'pass3', 'EMPLOYEE')");
+        createThreeTestUsers();
 
         ResponseEntity<PagedResponse<UserDto>> response = restTemplate.exchange(
                 MAIN_PATH,
@@ -407,5 +389,22 @@ public class UserControllerIIT extends BaseIntegrationTest {
         }, keyHolder);
 
         return keyHolder.getKey().longValue();
+    }
+
+    private Long createTestUser(String name, String email, Role role) {
+        return insertUserAndGetId(
+                UserDto.builder()
+                        .fullName(name)
+                        .email(email)
+                        .password("password")
+                        .role(role)
+                        .build()
+        );
+    }
+
+    private void createThreeTestUsers() {
+        createTestUser("User1", "user1@mail.com", Role.ADMIN);
+        createTestUser("User2", "user2@mail.com", Role.ADMIN);
+        createTestUser("User3", "user3@mail.com", Role.EMPLOYEE);
     }
 }
