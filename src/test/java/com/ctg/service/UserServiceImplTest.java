@@ -2,7 +2,8 @@ package com.ctg.service;
 
 import com.ctg.common.TestUserFactory;
 import com.ctg.dto.PagedResponse;
-import com.ctg.dto.UserDto;
+import com.ctg.dto.UserRequest;
+import com.ctg.dto.UserResponse;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
 import com.ctg.mapper.UserMapper;
@@ -24,6 +25,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -40,13 +43,15 @@ class UserServiceImplTest {
     private UserServiceImpl userService;
 
     private final Long userId = TestUserFactory.USER_ID;
-    private UserDto dto;
+    private UserRequest request;
+    private UserResponse response;
     private User entity;
 
     @BeforeEach
     void setup() {
-        dto = TestUserFactory.createUserDto();
-        entity = TestUserFactory.createUser();
+        request = TestUserFactory.createUserRequest();
+        entity = TestUserFactory.createUser(userId);
+        response = TestUserFactory.createUserResponse(userId);
     }
 
 
@@ -54,10 +59,20 @@ class UserServiceImplTest {
     @DisplayName("Get user — found")
     void getUserFound() {
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
-        when(userMapper.toDto(entity)).thenReturn(dto);
+        when(userMapper.toDto(entity)).thenReturn(response);
 
-        UserDto result = userService.getUser(userId);
-        assertThat(result).isEqualTo(dto);
+        UserResponse result = userService.getUser(userId);
+
+        assertAll("found user",
+                () -> assertNotNull(result),
+                () -> assertEquals(result.getId(), response.getId()),
+                () -> assertEquals(result.getFullName(), response.getFullName()),
+                () -> assertEquals(result.getRole(), response.getRole()),
+                () -> assertEquals(result.getEmail(), response.getEmail())
+        );
+
+        verify(userRepo, times(1)).findById(userId);
+        verify(userMapper, times(1)).toDto(entity);
     }
 
     @Test
@@ -67,6 +82,8 @@ class UserServiceImplTest {
 
         assertThatThrownBy(() -> userService.getUser(userId))
                 .isInstanceOf(ResourceNotFoundException.class);
+
+        verify(userRepo, times(1)).findById(userId);
     }
 
     @DisplayName("Get paged - with users")
@@ -77,13 +94,27 @@ class UserServiceImplTest {
         Page<User> userPage = new PageImpl<>(List.of(entity));
 
         when(userRepo.findAll(any(PageRequest.class))).thenReturn(userPage);
-        when(userMapper.toDto(entity)).thenReturn(dto);
+        when(userMapper.toDto(entity)).thenReturn(response);
 
-        PagedResponse<UserDto> pagedResponse = userService.getPagedUsers(page, size, sortBy, sortDir);
+        PagedResponse<UserResponse> pagedResponse = userService.getPagedUsers(page, size, sortBy, sortDir);
 
-        assertThat(pagedResponse.getPageSize()).isEqualTo(1);
-        assertThat(pagedResponse.getPageNumber()).isEqualTo(page);
-        assertThat(pagedResponse.getContent()).hasSize(1);
+        List<UserResponse> pageContent = pagedResponse.getContent();
+        UserResponse first = pageContent.getFirst();
+
+        assertAll("found paged user",
+                () -> assertNotNull(pagedResponse),
+                () -> assertNotNull(first),
+                () -> assertEquals(pagedResponse.getPageSize(), 1),
+                () -> assertEquals(pagedResponse.getPageNumber(), page),
+                () -> assertEquals(pageContent.size(), 1),
+                () -> assertEquals(first.getId(), response.getId()),
+                () -> assertEquals(first.getFullName(), response.getFullName()),
+                () -> assertEquals(first.getRole(), response.getRole()),
+                () -> assertEquals(first.getEmail(), response.getEmail())
+        );
+
+        verify(userRepo, times(1)).findAll(any(PageRequest.class));
+        verify(userMapper, times(1)).toDto(entity);
     }
 
     @DisplayName("Get paged - empty content")
@@ -95,34 +126,49 @@ class UserServiceImplTest {
 
         when(userRepo.findAll(any(PageRequest.class))).thenReturn(userPage);
 
-        PagedResponse<UserDto> pagedResponse = userService.getPagedUsers(page, size, sortBy, sortDir);
+        PagedResponse<UserResponse> pagedResponse = userService.getPagedUsers(page, size, sortBy, sortDir);
 
-        assertThat(pagedResponse.getPageSize()).isEqualTo(0);
-        assertThat(pagedResponse.getPageNumber()).isEqualTo(page);
-        assertThat(pagedResponse.getContent()).hasSize(0);
+        assertAll("found paged user",
+                () -> assertNotNull(pagedResponse),
+                () -> assertEquals(pagedResponse.getPageSize(), 0),
+                () -> assertEquals(pagedResponse.getPageNumber(), page),
+                () -> assertEquals(pagedResponse.getContent().size(), 0));
 
+        verify(userRepo, times(1)).findAll(any(PageRequest.class));
         verify(userMapper, never()).toDto(entity);
     }
 
     @Test
     @DisplayName("Create user — created")
     void createUserCreated() {
-        when(userRepo.existsByEmail(dto.getEmail())).thenReturn(false);
-        when(userMapper.toEntity(dto)).thenReturn(entity);
+        when(userRepo.existsByEmail(request.getEmail())).thenReturn(false);
+        when(userMapper.toEntity(request)).thenReturn(entity);
         when(userRepo.save(entity)).thenReturn(entity);
-        when(userMapper.toDto(entity)).thenReturn(dto);
+        when(userMapper.toDto(entity)).thenReturn(response);
 
-        UserDto result = userService.createUser(dto);
-        assertThat(result).isEqualTo(dto);
+        UserResponse result = userService.createUser(request);
+
+        assertAll("created user",
+                () -> assertNotNull(result),
+                () -> assertEquals(result.getId(), response.getId()),
+                () -> assertEquals(result.getFullName(), response.getFullName()),
+                () -> assertEquals(result.getRole(), response.getRole()),
+                () -> assertEquals(result.getEmail(), response.getEmail())
+        );
+
+        verify(userRepo, times(1)).existsByEmail(request.getEmail());
+        verify(userMapper, times(1)).toEntity(request);
+        verify(userRepo, times(1)).save(entity);
+        verify(userMapper, times(1)).toDto(entity);
     }
 
     @Test
     @DisplayName("Create user — email already exists")
     void createUserEmailAlreadyExists() {
-        when(userRepo.existsByEmail(dto.getEmail())).thenReturn(true);
+        when(userRepo.existsByEmail(response.getEmail())).thenReturn(true);
 
         ValidationException ex = catchThrowableOfType(
-                () -> userService.createUser(dto),
+                () -> userService.createUser(request),
                 ValidationException.class
         );
 
@@ -130,33 +176,44 @@ class UserServiceImplTest {
                 .extracting(ErrorField::getField)
                 .containsExactly("email");
 
+        verify(userRepo, times(1)).existsByEmail(request.getEmail());
+        verify(userMapper, never()).toEntity(request);
         verify(userRepo, never()).save(any());
     }
 
     @DisplayName("Update user - updated")
     @Test
     void updateUserUpdated() {
-        UserDto updatedEmail = TestUserFactory.userDtoWithEmail("updatedEmail@yandex.com");
+        UserRequest updatedEmail = TestUserFactory.createUserRequestWithEmail("updatedEmail@yandex.com");
+        UserResponse updatedResponse = TestUserFactory.createUserResponse(userId, updatedEmail);
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
         when(userRepo.existsByEmail(updatedEmail.getEmail())).thenReturn(false);
-        when(userRepo.save(entity)).thenReturn(entity);
-        when(userMapper.toDto(entity)).thenReturn(updatedEmail);
+        when(userMapper.toDto(entity)).thenReturn(updatedResponse);
 
-        UserDto updatedUser = userService.updateUser(updatedEmail, userId);
+        UserResponse result = userService.updateUser(updatedEmail, userId);
 
-        assertThat(updatedUser).isEqualTo(updatedEmail);
+        assertAll("updated user",
+                () -> assertNotNull(result),
+                () -> assertEquals(result.getId(), updatedResponse.getId()),
+                () -> assertEquals(result.getFullName(), updatedResponse.getFullName()),
+                () -> assertEquals(result.getRole(), updatedResponse.getRole()),
+                () -> assertEquals(result.getEmail(), updatedResponse.getEmail())
+        );
+
+        verify(userRepo, times(1)).findById(userId);
+        verify(userRepo, times(1)).existsByEmail(updatedEmail.getEmail());
+        verify(userMapper, times(1)).toDto(entity);
     }
 
     @DisplayName("Update user - email already exists")
     @Test
     void updateUserEmailAlreadyExists() {
-        entity.setId(userId);
-        dto.setEmail("changedEmail@yandex.ru");
+        UserRequest updatedUser = TestUserFactory.createUserRequestWithEmail("changedEmail@yandex.ru");
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
-        when(userRepo.existsByEmail(dto.getEmail())).thenReturn(true);
+        when(userRepo.existsByEmail(updatedUser.getEmail())).thenReturn(true);
 
         ValidationException ex = catchThrowableOfType(
-                () -> userService.updateUser(dto, userId),
+                () -> userService.updateUser(updatedUser, userId),
                 ValidationException.class
         );
 
@@ -164,7 +221,8 @@ class UserServiceImplTest {
                 .extracting(ErrorField::getField)
                 .containsExactly("email");
 
-        verify(userRepo, never()).save(any());
+        verify(userRepo, times(1)).findById(userId);
+        verify(userRepo, times(1)).existsByEmail(updatedUser.getEmail());
         verify(userMapper, never()).toDto(entity);
     }
 
@@ -175,6 +233,7 @@ class UserServiceImplTest {
 
         userService.deleteUser(userId);
 
+        verify(userRepo, times(1)).existsById(userId);
         verify(userRepo).deleteById(userId);
     }
 
@@ -188,6 +247,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("User not found");
 
+        verify(userRepo, times(1)).existsById(userId);
         verify(userRepo, never()).deleteById(userId);
     }
 }

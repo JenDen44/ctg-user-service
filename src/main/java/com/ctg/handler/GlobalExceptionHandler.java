@@ -19,7 +19,7 @@ import java.util.List;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public ErrorResponse handleValidationExceptions(MethodArgumentNotValidException ex) {
         List<ErrorField> errorFields = new ArrayList<>();
 
@@ -33,7 +33,7 @@ public class GlobalExceptionHandler {
                 errorFields.add(new ErrorField(globalError.getObjectName(), globalError.getDefaultMessage()))
         );
 
-        return new ErrorResponse("Validation failed", null, HttpStatus.BAD_REQUEST, errorFields);
+        return new ErrorResponse("Validation failed", null, HttpStatus.UNPROCESSABLE_ENTITY, errorFields);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -43,9 +43,9 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ValidationException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public ErrorResponse handleCustomValidation(ValidationException ex) {
-        return new ErrorResponse(ex.getMessage(), null, HttpStatus.BAD_REQUEST, ex.getErrorFields());
+        return new ErrorResponse(ex.getMessage(), null, HttpStatus.UNPROCESSABLE_ENTITY, ex.getErrorFields());
     }
 
     @ExceptionHandler(MismatchedInputException.class)

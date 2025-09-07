@@ -1,6 +1,7 @@
 package com.ctg.mapper;
 
-import com.ctg.dto.UserDto;
+import com.ctg.dto.UserRequest;
+import com.ctg.dto.UserResponse;
 import com.ctg.model.User;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -11,12 +12,11 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
         nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
 public interface UserMapper {
 
-    @Mapping(target = "password", ignore = true)
-    UserDto toDto(User user);
+    UserResponse toDto(User user);
 
     @Mapping(target = "id", ignore = true)
-    User toEntity(UserDto userDto);
+    User toEntity(UserRequest userDto);
 
     @Mapping(target = "id", ignore = true)
-    void updateEntityFromDto(UserDto userDto, @MappingTarget User existingUser);
+    void updateEntityFromDto(UserRequest updatedUser, @MappingTarget User existingUser);
 }

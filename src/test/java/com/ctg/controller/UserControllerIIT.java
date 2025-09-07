@@ -3,7 +3,8 @@ package com.ctg.controller;
 import com.ctg.common.BaseIntegrationTest;
 import com.ctg.common.TestUserFactory;
 import com.ctg.dto.PagedResponse;
-import com.ctg.dto.UserDto;
+import com.ctg.dto.UserRequest;
+import com.ctg.dto.UserResponse;
 import com.ctg.model.Role;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +18,8 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import java.sql.PreparedStatement;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class UserControllerIIT extends BaseIntegrationTest {
 
@@ -33,6 +36,8 @@ public class UserControllerIIT extends BaseIntegrationTest {
     private static final String CODE_404 = "\"code\":404";
     private static final String CODE_400 = "\"code\":400";
 
+    private static final String CODE_422 = "\"code\":422";
+
     @AfterEach
     void cleanUp() {
         jdbcTemplate.execute("ALTER TABLE users DISABLE TRIGGER ALL;");
@@ -43,23 +48,31 @@ public class UserControllerIIT extends BaseIntegrationTest {
     @Test
     @DisplayName("POST /users — OK")
     void createUserOK() {
-        UserDto newUser = TestUserFactory.createUserDto();
+        UserRequest newUser = TestUserFactory.createUserRequest();
 
-        ResponseEntity<UserDto> response = restTemplate.postForEntity(
+        ResponseEntity<UserResponse> response = restTemplate.postForEntity(
                 MAIN_PATH,
                 newUser,
-                UserDto.class
+                UserResponse.class
         );
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().getId()).isNotNull();
+        UserResponse result = response.getBody();
+
+        assertAll("created user",
+                () -> assertNotNull(result),
+                () -> assertThat(result.getId()).isNotNull(),
+                () -> assertThat(result.getFullName()).isNotNull(),
+                () -> assertThat(result.getRole()).isNotNull(),
+                () -> assertThat(result.getEmail()).isNotNull(),
+                () -> assertEquals(response.getStatusCode(), HttpStatus.CREATED)
+        );
 
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM users WHERE email = ?",
                 Integer.class,
                 newUser.getEmail()
         );
+
         assertThat(count).isEqualTo(1);
     }
 
@@ -102,63 +115,50 @@ public class UserControllerIIT extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("POST /users — invalid email formats")
-    void createUserWithInvalidEmails() {
-        String invalidEmail = "invalidEmail";
-        UserDto userWithInvalidEmail = TestUserFactory.userDtoWithEmail(invalidEmail);
+    @DisplayName("POST /users — invalid parameters")
+    void createUserWithInvalidInvalidParams() {
+        UserRequest userWithInvalidParams = TestUserFactory
+                .createUserRequestWithParams("short", "invalidEmail@", "i");
 
         ResponseEntity<String> stringResponse = restTemplate.postForEntity(
                 MAIN_PATH,
-                userWithInvalidEmail,
+                userWithInvalidParams,
                 String.class
         );
-
-        assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-
-        String responseBody = stringResponse.getBody();
-        assertThat(responseBody).isNotNull();
-        assertThat(responseBody)
-                .contains(VALIDATION_TITLE)
-                .contains(CODE_400)
-                .contains("\"fields\":[{\"field\":\"email\",\"message\":\"Email should be valid\"}]");
-    }
-
-    @Test
-    @DisplayName("POST /users — invalid passwords")
-    void createUserWithInvalidPasswords() {
-        String invalidPassword = "short";
-        UserDto userWithInvalidPassword = TestUserFactory.userDtoWithPassword(invalidPassword);
-
-        ResponseEntity<String> stringResponse = restTemplate.postForEntity(
-                MAIN_PATH,
-                userWithInvalidPassword,
-                String.class
-        );
-        assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
 
         String responseBode = stringResponse.getBody();
-        assertThat(responseBode).isNotNull();
 
+        assertThat(responseBode).isNotNull();
         assertThat(responseBode)
                 .contains(VALIDATION_TITLE)
-                .contains(CODE_400)
-                .contains("\"fields\":[{\"field\":\"password\",\"message\":\"Password must be 8-100 characters\"}]");
+                .contains(CODE_422)
+                .contains("\"field\":\"fullName\",\"message\":\"Full name must be 2-100 characters\"")
+                .contains("\"field\":\"password\",\"message\":\"Password must be 8-100 characters\"")
+                .contains("\"field\":\"email\",\"message\":\"Email should be valid\"");
+
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users",
+                Integer.class
+        );
+
+        assertEquals(0, (int) count);
     }
 
     @Test
     @DisplayName("GET /users/{id} — OK")
     void getUserOK() {
-        UserDto userFromDb = TestUserFactory.createUserDto();
+        UserRequest userFromDb = TestUserFactory.createUserRequest();
         Long userId = insertUserAndGetId(userFromDb);
 
-        ResponseEntity<UserDto> response = restTemplate.getForEntity(
+        ResponseEntity<UserResponse> response = restTemplate.getForEntity(
                 MAIN_PATH_ID + userId,
-                UserDto.class
+                UserResponse.class
         );
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody())
-                .extracting(UserDto::getFullName, UserDto::getEmail)
+                .extracting(UserResponse::getFullName, UserResponse::getEmail)
                 .containsExactly(userFromDb.getFullName(), userFromDb.getEmail());
     }
 
@@ -173,7 +173,9 @@ public class UserControllerIIT extends BaseIntegrationTest {
         );
 
         assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
         String responseBody = stringResponse.getBody();
+
         assertThat(responseBody).isNotNull();
         assertThat(responseBody)
                 .contains(NOT_FOUND_TITLE)
@@ -185,31 +187,37 @@ public class UserControllerIIT extends BaseIntegrationTest {
     @DisplayName("PUT /users/{id} — OK")
     void updateUserOK() {
         Long userId = createTestUser("Old Name", "old@mail.com", Role.EMPLOYEE);
-        UserDto updatedUser = new UserDto(userId, "New Name", "new@mail.com", "newPassword", Role.ADMIN);
+        UserRequest updatedUser = new UserRequest("New Name", "new@mail.com", "newPassword", Role.ADMIN);
 
-        HttpEntity<UserDto> request = new HttpEntity<>(updatedUser);
+        HttpEntity<UserRequest> request = new HttpEntity<>(updatedUser);
 
-        ResponseEntity<UserDto> response = restTemplate.exchange(
+        ResponseEntity<UserResponse> response = restTemplate.exchange(
                 MAIN_PATH_ID + userId,
                 HttpMethod.PUT,
                 request,
-                UserDto.class
+                UserResponse.class
         );
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        UserDto responseUserDto = response.getBody();
-        assertThat(responseUserDto.getFullName()).isEqualTo(updatedUser.getFullName());
-        assertThat(responseUserDto.getRole()).isEqualTo(updatedUser.getRole());
-        assertThat(responseUserDto.getId()).isEqualTo(updatedUser.getId());
-        assertThat(responseUserDto.getEmail()).isEqualTo(updatedUser.getEmail());
+        UserResponse result = response.getBody();
+
+        assertAll("updated user",
+                () -> assertNotNull(response),
+                () -> assertEquals(response.getStatusCode(), HttpStatus.OK),
+                () -> assertNotNull(result),
+                () -> assertEquals(result.getFullName(), updatedUser.getFullName()),
+                () -> assertEquals(result.getRole(), updatedUser.getRole()),
+                () -> assertEquals(result.getEmail(), updatedUser.getEmail())
+        );
     }
 
     @Test
-    @DisplayName("PUT /users/{id} — invalid passwords")
-    void updateUserWithInvalidPassword() {
+    @DisplayName("PUT /users/{id} — invalid parameters")
+    void updateUserWithInvalidParameters() {
         Long userId = createTestUser("Old Name", "old@mail.com", Role.EMPLOYEE);
-        UserDto updatedUser = new UserDto(userId, "New Name", "new@mail.com", "short", Role.ADMIN);
-        HttpEntity<UserDto> request = new HttpEntity<>(updatedUser);
+        UserRequest userWithInvalidParams = TestUserFactory
+                .createUserRequestWithParams("short", "invalidEmail@", "i");
+
+        HttpEntity<UserRequest> request = new HttpEntity<>(userWithInvalidParams);
 
         ResponseEntity<String> stringResponse = restTemplate.exchange(
                 MAIN_PATH_ID + userId,
@@ -218,21 +226,24 @@ public class UserControllerIIT extends BaseIntegrationTest {
                 String.class
         );
 
-        assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        String responseBody = stringResponse.getBody();
-        assertThat(responseBody).isNotNull();
+        assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
 
-        assertThat(responseBody)
+        String responseBode = stringResponse.getBody();
+
+        assertThat(responseBode).isNotNull();
+        assertThat(responseBode)
                 .contains(VALIDATION_TITLE)
-                .contains(CODE_400)
-                .contains("\"fields\":[{\"field\":\"password\",\"message\":\"Password must be 8-100 characters\"}]");
+                .contains(CODE_422)
+                .contains("\"field\":\"fullName\",\"message\":\"Full name must be 2-100 characters\"")
+                .contains("\"field\":\"password\",\"message\":\"Password must be 8-100 characters\"")
+                .contains("\"field\":\"email\",\"message\":\"Email should be valid\"");
 
         String oldName = jdbcTemplate.queryForObject(
                 "SELECT full_name FROM users where id = " + userId,
                 String.class
         );
 
-        assertThat(oldName).isNotEqualTo(updatedUser);
+        assertNotEquals(oldName, userWithInvalidParams.getFullName());
     }
 
     @Test
@@ -259,37 +270,12 @@ public class UserControllerIIT extends BaseIntegrationTest {
         assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 
         String responseBody = stringResponse.getBody();
-        assertThat(responseBody).isNotNull();
 
+        assertThat(responseBody).isNotNull();
         assertThat(responseBody)
                 .contains("timestamp")
                 .contains("\"status\":400")
                 .contains("\"error\":\"Bad Request\"");
-    }
-
-    @Test
-    @DisplayName("PUT /users — invalid email formats")
-    void updateUserWithInvalidEmails() {
-        String invalidEmail = "invalidEmail";
-        UserDto userWithInvalidEmail = TestUserFactory.userDtoWithEmail(invalidEmail);
-
-        HttpEntity<UserDto> httpEntity = new HttpEntity<>(userWithInvalidEmail);
-
-        ResponseEntity<String> stringResponse = restTemplate.exchange(
-                MAIN_PATH_ID + 3,
-                HttpMethod.PUT,
-                httpEntity,
-                String.class
-        );
-
-        assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-
-        String responseBody = stringResponse.getBody();
-        assertThat(responseBody).isNotNull();
-        assertThat(responseBody)
-                .contains(VALIDATION_TITLE)
-                .contains(CODE_400)
-                .contains("\"fields\":[{\"field\":\"email\",\"message\":\"Email should be valid\"}]");
     }
 
     @Test
@@ -303,6 +289,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
                 "SELECT COUNT(*) FROM users WHERE id = " + userId,
                 Integer.class
         );
+
         assertThat(count).isEqualTo(0);
     }
 
@@ -317,7 +304,9 @@ public class UserControllerIIT extends BaseIntegrationTest {
         );
 
         assertThat(stringResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
         String responseBody = stringResponse.getBody();
+
         assertThat(responseBody).isNotNull();
         assertThat(responseBody)
                 .contains(NOT_FOUND_TITLE)
@@ -328,6 +317,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
                 "SELECT COUNT(*) FROM users WHERE id = " + 999,
                 Integer.class
         );
+
         assertThat(count).isEqualTo(0);
     }
 
@@ -336,7 +326,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
     void getPagedUsersWithParams() {
        createThreeTestUsers();
 
-        ResponseEntity<PagedResponse<UserDto>> response = restTemplate.exchange(
+        ResponseEntity<PagedResponse<UserResponse>> response = restTemplate.exchange(
                 MAIN_PATH + "?page=0&size=2",
                 HttpMethod.GET,
                 null,
@@ -344,10 +334,12 @@ public class UserControllerIIT extends BaseIntegrationTest {
         );
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        PagedResponse<UserDto> pagedResponse = response.getBody();
+
+        PagedResponse<UserResponse> pagedResponse = response.getBody();
+
         assertThat(pagedResponse.getContent())
                 .hasSize(2)
-                .extracting(UserDto::getEmail)
+                .extracting(UserResponse::getEmail)
                 .containsExactly("user1@mail.com", "user2@mail.com");
         assertThat(pagedResponse.getTotalElements()).isEqualTo(3);
     }
@@ -357,7 +349,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
     void getPagedUsersWithDefaultParams() {
         createThreeTestUsers();
 
-        ResponseEntity<PagedResponse<UserDto>> response = restTemplate.exchange(
+        ResponseEntity<PagedResponse<UserResponse>> response = restTemplate.exchange(
                 MAIN_PATH,
                 HttpMethod.GET,
                 null,
@@ -365,15 +357,17 @@ public class UserControllerIIT extends BaseIntegrationTest {
         );
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        PagedResponse<UserDto> pagedResponse = response.getBody();
+
+        PagedResponse<UserResponse> pagedResponse = response.getBody();
+
         assertThat(pagedResponse.getContent())
                 .hasSize(3)
-                .extracting(UserDto::getEmail)
+                .extracting(UserResponse::getEmail)
                 .containsExactly("user1@mail.com", "user2@mail.com", "user3@mail.com");
         assertThat(pagedResponse.getTotalElements()).isEqualTo(3);
     }
 
-    private Long insertUserAndGetId(UserDto user) {
+    private Long insertUserAndGetId(UserRequest request) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
 
         jdbcTemplate.update(connection -> {
@@ -381,10 +375,10 @@ public class UserControllerIIT extends BaseIntegrationTest {
                     "INSERT INTO users (email, full_name, password, role) VALUES (?, ?, ?, ?)",
                     new String[]{"id"}
             );
-            ps.setString(1, user.getEmail());
-            ps.setString(2, user.getFullName());
-            ps.setString(3, user.getPassword());
-            ps.setString(4, user.getRole().name());
+            ps.setString(1, request.getEmail());
+            ps.setString(2, request.getFullName());
+            ps.setString(3, request.getPassword());
+            ps.setString(4, request.getRole().name());
             return ps;
         }, keyHolder);
 
@@ -393,7 +387,7 @@ public class UserControllerIIT extends BaseIntegrationTest {
 
     private Long createTestUser(String name, String email, Role role) {
         return insertUserAndGetId(
-                UserDto.builder()
+                UserRequest.builder()
                         .fullName(name)
                         .email(email)
                         .password("password")

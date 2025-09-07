@@ -1,6 +1,5 @@
 package com.ctg.dto;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.ctg.model.Role;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -9,14 +8,10 @@ import jakarta.validation.constraints.Size;
 import lombok.*;
 
 @Getter
-@Setter
 @AllArgsConstructor
-@NoArgsConstructor
 @Builder
 @ToString
-public class UserDto {
-
-    private Long id;
+public class UserRequest {
 
     @NotBlank(message = "Full name is mandatory")
     @Size(min = 2, max = 100, message = "Full name must be 2-100 characters")

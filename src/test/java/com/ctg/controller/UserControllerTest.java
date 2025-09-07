@@ -1,8 +1,7 @@
 package com.ctg.controller;
 
 import com.ctg.common.TestUserFactory;
-import com.ctg.dto.PagedResponse;
-import com.ctg.dto.UserDto;
+import com.ctg.dto.UserRequest;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
 import com.ctg.model.ErrorField;
@@ -23,8 +22,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -52,15 +50,17 @@ class UserControllerTest {
     @Test
     @DisplayName("GET /users/{id} — OK")
     void getUserOK() throws Exception {
-        UserDto userDto = TestUserFactory.createUserDto(userId);
-        given(userService.getUser(userId)).willReturn(userDto);
+        var response = TestUserFactory.createUserResponse(userId);
+        given(userService.getUser(userId)).willReturn(response);
 
         mockMvc.perform(get(MAIN_PATH_ID, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId))
-                .andExpect(jsonPath("$.fullName").value(userDto.getFullName()))
-                .andExpect(jsonPath("$.email").value(userDto.getEmail()))
-                .andExpect(jsonPath("$.role").value(userDto.getRole().name()));
+                .andExpect(jsonPath("$.fullName").value(response.getFullName()))
+                .andExpect(jsonPath("$.email").value(response.getEmail()))
+                .andExpect(jsonPath("$.role").value(response.getRole().name()));
+
+        verify(userService, times(1)).getUser(userId);
     }
 
     @Test
@@ -72,6 +72,8 @@ class UserControllerTest {
         mockMvc.perform(get(MAIN_PATH_ID, userId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(message));
+
+        verify(userService, times(1)).getUser(userId);
     }
 
     @Test
@@ -99,7 +101,7 @@ class UserControllerTest {
     @Test
     @DisplayName("GET /users with default params — 200 OK")
     void getPagedUsersWithDefaultParams() throws Exception {
-        PagedResponse<UserDto> pagedResponse = TestUserFactory.pagedResponse();
+        var pagedResponse = TestUserFactory.pagedResponse();
 
         given(userService.getPagedUsers(anyInt(), anyInt(), anyString(), anyString()))
                 .willReturn(pagedResponse);
@@ -118,18 +120,21 @@ class UserControllerTest {
     @Test
     @DisplayName("POST /users — OK")
     void createUserOK() throws Exception {
-        UserDto userDto = TestUserFactory.createUserDto(userId);
+        var request = TestUserFactory.createUserRequest();
+        var response = TestUserFactory.createUserResponse(userId, request);
 
-        given(userService.createUser(any(UserDto.class))).willReturn(userDto);
+        given(userService.createUser(any(UserRequest.class))).willReturn(response);
 
         mockMvc.perform(post(MAIN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(toJson(userDto)))
+                .content(toJson(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(userId))
-                .andExpect(jsonPath("$.fullName").value(userDto.getFullName()))
-                .andExpect(jsonPath("$.email").value(userDto.getEmail()))
-                .andExpect(jsonPath("$.role").value(userDto.getRole().name()));
+                .andExpect(jsonPath("$.fullName").value(response.getFullName()))
+                .andExpect(jsonPath("$.email").value(response.getEmail()))
+                .andExpect(jsonPath("$.role").value(response.getRole().name()));
+
+        verify(userService, times(1)).createUser(any(UserRequest.class));
     }
 
     @Test
@@ -144,70 +149,79 @@ class UserControllerTest {
         mockMvc.perform(post(MAIN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(invalidJson))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isUnprocessableEntity());
+
+        verify(userService, never()).createUser(any(UserRequest.class));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "invalidEmail", "user@", "user@.", "user@com"})
+    @ValueSource(strings = {"", "invalidEmail", "user@", "@.", "user"})
     @DisplayName("POST /users — invalid email formats")
     void createUserWithInvalidEmails(String email) throws Exception {
-        UserDto dto = TestUserFactory.userDtoWithEmail(email);
+        var request = TestUserFactory.createUserRequestWithEmail(email);
         doThrow(new ValidationException(List.of(new ErrorField("email", "Email should be valid"))))
-                .when(userService).createUser(any());
+                .when(userService).createUser(any(UserRequest.class));
 
         mockMvc.perform(post(MAIN_PATH)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(toJson(dto)))
-                .andExpect(status().isBadRequest())
+                        .content(toJson(request)))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.fields[0].field").value("email"));
+
+        verify(userService, never()).createUser(any(UserRequest.class));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "123", "short", "pass12"})
     @DisplayName("POST /users — invalid passwords")
     void createUserWithInvalidPasswords(String password) throws Exception {
-        UserDto dto = TestUserFactory.userDtoWithPassword(password);
+        var request = TestUserFactory.createUserRequestWithPassword(password);
         doThrow(new ValidationException(List.of(new ErrorField("password", "Password must be 8-100 characters"))))
                 .when(userService).createUser(any());
 
         mockMvc.perform(post(MAIN_PATH)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(toJson(dto)))
-                .andExpect(status().isBadRequest())
+                        .content(toJson(request)))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.fields[0].field").value("password"));
+
+        verify(userService, never()).createUser(any(UserRequest.class));
     }
 
     @DisplayName("PUT /users/{id} — OK")
     @Test
     void updateUserOk() throws Exception {
-        UserDto userDto = TestUserFactory.createUserDto(userId);
-        given(userService.updateUser(any(UserDto.class), eq(userId))).willReturn(userDto);
+        var request = TestUserFactory.createUserRequest();
+        var response = TestUserFactory.createUserResponse(userId, request);
+        given(userService.updateUser(any(UserRequest.class), eq(userId))).willReturn(response);
 
         mockMvc.perform(put(MAIN_PATH_ID, userId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(userDto)))
+                .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId))
-                .andExpect(jsonPath("$.fullName").value(userDto.getFullName()))
-                .andExpect(jsonPath("$.email").value(userDto.getEmail()))
-                .andExpect(jsonPath("$.role").value(userDto.getRole().name()));
+                .andExpect(jsonPath("$.fullName").value(response.getFullName()))
+                .andExpect(jsonPath("$.email").value(response.getEmail()))
+                .andExpect(jsonPath("$.role").value(response.getRole().name()));
 
-        verify(userService).updateUser(any(UserDto.class), anyLong());
+        verify(userService).updateUser(any(UserRequest.class), anyLong());
     }
 
     @DisplayName("PUT /users/{id} — USER NOT FOUND")
     @Test
     void updateUserNotFound() throws Exception {
         String message = "User not found with id: " + userId;
-        UserDto userDto = TestUserFactory.createUserDto(userId);
+        var request = TestUserFactory.createUserRequest();
         doThrow(new ResourceNotFoundException(message))
-                .when(userService).updateUser(any(UserDto.class), eq(userId));
+                .when(userService).updateUser(any(UserRequest.class), eq(userId));
 
         mockMvc.perform(put(MAIN_PATH_ID, userId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(userDto)))
+                .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(message));
+
+        verify(userService).updateUser(any(UserRequest.class), anyLong());
     }
 
     @Test
@@ -222,36 +236,43 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(brokenJson))
                 .andExpect(status().isBadRequest());
+
+        verify(userService, never()).updateUser(any(UserRequest.class), anyLong());
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "invalidEmail", "user@", "user@."})
     @DisplayName("POST /users — invalid email formats")
     void updateUserWithInvalidEmails(String email) throws Exception {
-        UserDto userDto = TestUserFactory.userDtoWithEmail(email);
+        var request = TestUserFactory.createUserRequestWithEmail(email);
         doThrow(new ValidationException(List.of(new ErrorField("email", "Email should be valid"))))
-                .when(userService).updateUser(userDto, userId);
+                .when(userService).updateUser(request, userId);
 
         mockMvc.perform(put(MAIN_PATH_ID, userId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(toJson(userDto)))
-                .andExpect(status().isBadRequest())
+                .content(toJson(request)))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.fields[0].field").value("email"));
+
+        verify(userService, never()).updateUser(any(UserRequest.class), anyLong());
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "123", "short", "pass12"})
     @DisplayName("POST /users — invalid passwords")
     void updateUserWithInvalidPasswords(String password) throws Exception {
-        UserDto userDto = TestUserFactory.userDtoWithPassword(password);
+        var request = TestUserFactory.createUserRequestWithPassword(password);
+
         doThrow(new ValidationException(List.of(new ErrorField("password", "Password must be 8-100 characters"))))
-                .when(userService).updateUser(userDto, userId);
+                .when(userService).updateUser(request, userId);
 
         mockMvc.perform(post(MAIN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(toJson(userDto)))
-                .andExpect(status().isBadRequest())
+                .content(toJson(request)))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.fields[0].field").value("password"));
+
+        verify(userService, never()).updateUser(any(UserRequest.class), anyLong());
     }
 
     @Test
@@ -274,5 +295,7 @@ class UserControllerTest {
         mockMvc.perform(delete(MAIN_PATH_ID, userId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(message));
+
+        verify(userService).deleteUser(userId);
     }
 }
