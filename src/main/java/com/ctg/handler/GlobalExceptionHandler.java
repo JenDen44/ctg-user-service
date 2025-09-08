@@ -4,31 +4,36 @@ import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
 import com.ctg.model.ErrorField;
 import com.ctg.model.ErrorResponse;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public ErrorResponse handleValidationExceptions(MethodArgumentNotValidException ex) {
-        List<ErrorField> errorFields = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(fieldError -> new ErrorField(fieldError.getField(), fieldError.getDefaultMessage()))
-                .toList();
+        List<ErrorField> errorFields = new ArrayList<>();
 
-        ex.getBindingResult().getGlobalErrors().forEach(error -> {
-            errorFields.add(new ErrorField(error.getObjectName(), error.getDefaultMessage()));
-        });
+        // Field errors
+        ex.getBindingResult().getFieldErrors().forEach(fieldError ->
+                errorFields.add(new ErrorField(fieldError.getField(), fieldError.getDefaultMessage()))
+        );
 
-        return new ErrorResponse("Validation failed", null, HttpStatus.BAD_REQUEST, errorFields);
+        // Global errors
+        ex.getBindingResult().getGlobalErrors().forEach(globalError ->
+                errorFields.add(new ErrorField(globalError.getObjectName(), globalError.getDefaultMessage()))
+        );
+
+        return new ErrorResponse("Validation failed", null, HttpStatus.UNPROCESSABLE_ENTITY, errorFields);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -38,14 +43,19 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ValidationException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public ErrorResponse handleCustomValidation(ValidationException ex) {
-        return new ErrorResponse(ex.getMessage(), null, HttpStatus.BAD_REQUEST, ex.getErrorFields());
+        return new ErrorResponse(ex.getMessage(), null, HttpStatus.UNPROCESSABLE_ENTITY, ex.getErrorFields());
     }
 
-    @ExceptionHandler(Exception.class)
-    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public ErrorResponse handleAllExceptions(Exception ex) {
-        return new ErrorResponse("Internal server error", ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR, null);
+    @ExceptionHandler(MismatchedInputException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleJsonParseError(MismatchedInputException ex) {
+        return new ErrorResponse(ex.getMessage(), null, HttpStatus.BAD_REQUEST, null);
+    }
+
+    @ExceptionHandler(InvalidFormatException.class)
+    public ErrorResponse handleInvalidFormat(InvalidFormatException ex) {
+        return new ErrorResponse(ex.getMessage(), null, HttpStatus.BAD_REQUEST, null);
     }
 }

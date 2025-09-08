@@ -1,11 +1,12 @@
 package com.ctg.service;
 
 import com.ctg.dto.PagedResponse;
+import com.ctg.dto.UserRequest;
+import com.ctg.dto.UserResponse;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
 import com.ctg.model.ErrorField;
 import com.ctg.repository.UserRepository;
-import com.ctg.dto.UserDto;
 import com.ctg.mapper.UserMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +29,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserDto getUser(Long id) {
+    public UserResponse getUser(Long id) {
         return userRepository.findById(id)
                 .map(userMapper::toDto)
                 .orElseThrow(() -> {
@@ -38,7 +39,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserDto createUser(@Valid UserDto userDto) {
+    public UserResponse createUser(@Valid UserRequest userDto) {
         if (userRepository.existsByEmail(userDto.getEmail())) {
             log.error("Email already exists {}", userDto.getEmail());
             throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
@@ -50,7 +51,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserDto updateUser(@Valid UserDto userDto, Long id) {
+    public UserResponse updateUser(@Valid UserRequest userDto, Long id) {
         return userRepository.findById(id)
                 .map(existingUser -> {
                     if (!existingUser.getEmail().equals(userDto.getEmail())
@@ -59,7 +60,6 @@ public class UserServiceImpl implements UserService {
                         throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
                     }
                     userMapper.updateEntityFromDto(userDto, existingUser);
-                    userRepository.save(existingUser);
                     log.debug("Newly updated user {}", existingUser);
 
                     return userMapper.toDto(existingUser);
@@ -82,7 +82,7 @@ public class UserServiceImpl implements UserService {
 
     @Transactional(readOnly = true)
     @Override
-    public PagedResponse<UserDto> getPagedUsers(int pageNo, int pageSize, String sortBy, String sortDir) {
+    public PagedResponse<UserResponse> getPagedUsers(int pageNo, int pageSize, String sortBy, String sortDir) {
         log.info("page params : {}, {}, {}, {}", pageNo, pageSize, sortBy, sortDir);
 
         var direction = Sort.Direction.fromOptionalString(sortDir).orElse(Sort.Direction.ASC);

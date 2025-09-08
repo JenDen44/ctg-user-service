@@ -2,7 +2,8 @@ package com.ctg.controller;
 
 import com.ctg.constants.PaginationConstants;
 import com.ctg.dto.PagedResponse;
-import com.ctg.dto.UserDto;
+import com.ctg.dto.UserRequest;
+import com.ctg.dto.UserResponse;
 import com.ctg.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,7 @@ public class UserController {
     private final UserService userService;
 
     @GetMapping
-    public PagedResponse<UserDto> getUsers(
+    public PagedResponse<UserResponse> getUsers(
             @RequestParam(value = "page",
                     defaultValue = PaginationConstants.DEFAULT_PAGE_NUMBER, required = false) int page,
             @RequestParam(value = "size",
@@ -31,18 +32,18 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    public UserDto getUser(@PathVariable("id") Long id) {
+    public UserResponse getUser(@PathVariable("id") Long id) {
         return userService.getUser(id);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public UserDto createNewUser(@Valid @RequestBody UserDto newUser) {
+    public UserResponse createNewUser(@Valid @RequestBody UserRequest newUser) {
         return userService.createUser(newUser);
     }
 
     @PutMapping("/{id}")
-    public UserDto updateUser(@Valid @RequestBody UserDto updatedUser, @PathVariable("id") Long id) {
+    public UserResponse updateUser(@Valid @RequestBody UserRequest updatedUser, @PathVariable("id") Long id) {
         return userService.updateUser(updatedUser, id);
     }
 
