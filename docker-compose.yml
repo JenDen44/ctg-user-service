@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  ctg_user_service:
+    build: .
+    container_name: ctg_user_service_container
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - user_service_db
+    environment:
+      DATASOURCE_URL: jdbc:postgresql://user_service_db:5432/ctg_user_service
+      DATASOURCE_USERNAME: jndServices
+      DATASOURCE_PASSWORD: jndCtgUserService
+
+  user_service_db:
+    image: postgres:15
+    container_name: user_service_db
+    environment:
+      POSTGRES_USER: jndServices
+      POSTGRES_PASSWORD: jndCtgUserService
+      POSTGRES_DB: ctg_user_service
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U jndServices -d ctg_user_service" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:
