@@ -7,19 +7,22 @@ import com.ctg.dto.UserResponse;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
 import com.ctg.mapper.UserMapper;
-import com.ctg.model.ErrorField;
+import com.ctg.dto.ErrorField;
 import com.ctg.model.User;
 import com.ctg.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +41,9 @@ class UserServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private PasswordEncoder encoder;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -61,7 +67,7 @@ class UserServiceImplTest {
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
         when(userMapper.toDto(entity)).thenReturn(response);
 
-        UserResponse result = userService.getUser(userId);
+        UserResponse result = userService.get(userId);
 
         assertAll("found user",
                 () -> assertNotNull(result),
@@ -80,7 +86,7 @@ class UserServiceImplTest {
     void getUserNotFound() {
         when(userRepo.findById(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.getUser(userId))
+        assertThatThrownBy(() -> userService.get(userId))
                 .isInstanceOf(ResourceNotFoundException.class);
 
         verify(userRepo, times(1)).findById(userId);
@@ -96,7 +102,7 @@ class UserServiceImplTest {
         when(userRepo.findAll(any(PageRequest.class))).thenReturn(userPage);
         when(userMapper.toDto(entity)).thenReturn(response);
 
-        PagedResponse<UserResponse> pagedResponse = userService.getPagedUsers(page, size, sortBy, sortDir);
+        PagedResponse<UserResponse> pagedResponse = userService.getPage(page, size, sortBy, sortDir);
 
         List<UserResponse> pageContent = pagedResponse.getContent();
         UserResponse first = pageContent.getFirst();
@@ -126,7 +132,7 @@ class UserServiceImplTest {
 
         when(userRepo.findAll(any(PageRequest.class))).thenReturn(userPage);
 
-        PagedResponse<UserResponse> pagedResponse = userService.getPagedUsers(page, size, sortBy, sortDir);
+        PagedResponse<UserResponse> pagedResponse = userService.getPage(page, size, sortBy, sortDir);
 
         assertAll("found paged user",
                 () -> assertNotNull(pagedResponse),
@@ -138,15 +144,22 @@ class UserServiceImplTest {
         verify(userMapper, never()).toDto(entity);
     }
 
+
     @Test
     @DisplayName("Create user — created")
     void createUserCreated() {
-        when(userRepo.existsByEmail(request.getEmail())).thenReturn(false);
-        when(userMapper.toEntity(request)).thenReturn(entity);
-        when(userRepo.save(entity)).thenReturn(entity);
-        when(userMapper.toDto(entity)).thenReturn(response);
+        when(userRepo.existsByEmailIgnoreCase(request.getEmail())).thenReturn(false);
+        when(encoder.encode(request.getPassword())).thenReturn("hashedPwd");
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        when(userRepo.save(any(User.class)))
+                .thenAnswer(inv -> {
+                    User u = inv.getArgument(0);
+                    u.setId(10L);
+                    return u;
+                });
+        when(userMapper.toDto(any(User.class))).thenReturn(response);
 
-        UserResponse result = userService.createUser(request);
+        var result = userService.create(request);
 
         assertAll("created user",
                 () -> assertNotNull(result),
@@ -156,19 +169,19 @@ class UserServiceImplTest {
                 () -> assertEquals(result.getEmail(), response.getEmail())
         );
 
-        verify(userRepo, times(1)).existsByEmail(request.getEmail());
-        verify(userMapper, times(1)).toEntity(request);
-        verify(userRepo, times(1)).save(entity);
-        verify(userMapper, times(1)).toDto(entity);
+        verify(userRepo, times(1)).existsByEmailIgnoreCase(request.getEmail());
+        verify(userRepo, times(1)).save(userCaptor.capture());
+        verify(userMapper, times(1)).toDto(userCaptor.capture());
+        verify(encoder, times(1)).encode(request.getPassword());
     }
 
     @Test
     @DisplayName("Create user — email already exists")
     void createUserEmailAlreadyExists() {
-        when(userRepo.existsByEmail(response.getEmail())).thenReturn(true);
+        when(userRepo.existsByEmailIgnoreCase(response.getEmail())).thenReturn(true);
 
         ValidationException ex = catchThrowableOfType(
-                () -> userService.createUser(request),
+                () -> userService.create(request),
                 ValidationException.class
         );
 
@@ -176,7 +189,7 @@ class UserServiceImplTest {
                 .extracting(ErrorField::getField)
                 .containsExactly("email");
 
-        verify(userRepo, times(1)).existsByEmail(request.getEmail());
+        verify(userRepo, times(1)).existsByEmailIgnoreCase(request.getEmail());
         verify(userMapper, never()).toEntity(request);
         verify(userRepo, never()).save(any());
     }
@@ -187,10 +200,10 @@ class UserServiceImplTest {
         UserRequest updatedEmail = TestUserFactory.createUserRequestWithEmail("updatedEmail@yandex.com");
         UserResponse updatedResponse = TestUserFactory.createUserResponse(userId, updatedEmail);
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
-        when(userRepo.existsByEmail(updatedEmail.getEmail())).thenReturn(false);
+        when(userRepo.existsByEmailIgnoreCase(updatedEmail.getEmail())).thenReturn(false);
         when(userMapper.toDto(entity)).thenReturn(updatedResponse);
 
-        UserResponse result = userService.updateUser(updatedEmail, userId);
+        UserResponse result = userService.update(updatedEmail, userId);
 
         assertAll("updated user",
                 () -> assertNotNull(result),
@@ -201,7 +214,7 @@ class UserServiceImplTest {
         );
 
         verify(userRepo, times(1)).findById(userId);
-        verify(userRepo, times(1)).existsByEmail(updatedEmail.getEmail());
+        verify(userRepo, times(1)).existsByEmailIgnoreCase(updatedEmail.getEmail());
         verify(userMapper, times(1)).toDto(entity);
     }
 
@@ -210,10 +223,10 @@ class UserServiceImplTest {
     void updateUserEmailAlreadyExists() {
         UserRequest updatedUser = TestUserFactory.createUserRequestWithEmail("changedEmail@yandex.ru");
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
-        when(userRepo.existsByEmail(updatedUser.getEmail())).thenReturn(true);
+        when(userRepo.existsByEmailIgnoreCase(updatedUser.getEmail())).thenReturn(true);
 
         ValidationException ex = catchThrowableOfType(
-                () -> userService.updateUser(updatedUser, userId),
+                () -> userService.update(updatedUser, userId),
                 ValidationException.class
         );
 
@@ -222,7 +235,7 @@ class UserServiceImplTest {
                 .containsExactly("email");
 
         verify(userRepo, times(1)).findById(userId);
-        verify(userRepo, times(1)).existsByEmail(updatedUser.getEmail());
+        verify(userRepo, times(1)).existsByEmailIgnoreCase(updatedUser.getEmail());
         verify(userMapper, never()).toDto(entity);
     }
 
@@ -231,7 +244,7 @@ class UserServiceImplTest {
     void deleteUserDeleted() {
         when(userRepo.existsById(userId)).thenReturn(true);
 
-        userService.deleteUser(userId);
+        userService.delete(userId);
 
         verify(userRepo, times(1)).existsById(userId);
         verify(userRepo).deleteById(userId);
@@ -243,11 +256,50 @@ class UserServiceImplTest {
         when(userRepo.existsById(userId)).thenReturn(false);
 
         assertThatThrownBy(() ->
-                userService.deleteUser(userId))
+                userService.delete(userId))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("User not found");
 
         verify(userRepo, times(1)).existsById(userId);
         verify(userRepo, never()).deleteById(userId);
+    }
+
+    @DisplayName("findByEmailForLogin - found")
+    void findByEmailFound() {
+        when(userRepo.findByEmailIgnoreCase(entity.getEmail())).thenReturn(Optional.of(entity));
+
+       User foundUser = userService.findByEmailForLogin(entity.getEmail());
+
+        assertThat(foundUser).isEqualTo(entity);
+    }
+
+    @Test
+    @DisplayName("findByEmailForLogin - not found")
+    void findByEmailNotFound() {
+        String notExistingEmail = "notExistingEmail@mail.com";
+        when(userRepo.findByEmailIgnoreCase(notExistingEmail)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.findByEmailForLogin(notExistingEmail))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("increment tokenVersion - incremented")
+    void incrementTokenVersionIncremented() {
+        when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
+
+        userService.incrementTokenVersion(userId);
+
+        assertThat(entity.getTokenVersion()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("increment TokenVersion - not found")
+    void incrementTokenVersionNotFound() {
+        Long notExistingId = 999L;
+        when(userRepo.findById(notExistingId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.incrementTokenVersion(notExistingId))
+                .isInstanceOf(ResourceNotFoundException.class);
     }
 }
