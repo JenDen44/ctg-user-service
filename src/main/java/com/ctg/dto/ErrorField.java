@@ -1,4 +1,4 @@
-package com.ctg.model;
+package com.ctg.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

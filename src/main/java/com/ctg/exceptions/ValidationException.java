@@ -1,6 +1,6 @@
 package com.ctg.exceptions;
 
-import com.ctg.model.ErrorField;
+import com.ctg.dto.ErrorField;
 import lombok.Getter;
 
 import java.util.List;
