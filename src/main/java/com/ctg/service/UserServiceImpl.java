@@ -5,7 +5,8 @@ import com.ctg.dto.UserRequest;
 import com.ctg.dto.UserResponse;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
-import com.ctg.model.ErrorField;
+import com.ctg.dto.ErrorField;
+import com.ctg.model.User;
 import com.ctg.repository.UserRepository;
 import com.ctg.mapper.UserMapper;
 import jakarta.validation.Valid;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,10 +28,11 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+    private final PasswordEncoder encoder;
 
     @Override
     @Transactional(readOnly = true)
-    public UserResponse getUser(Long id) {
+    public UserResponse get(Long id) {
         return userRepository.findById(id)
                 .map(userMapper::toDto)
                 .orElseThrow(() -> {
@@ -39,23 +42,32 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserResponse createUser(@Valid UserRequest userDto) {
-        if (userRepository.existsByEmail(userDto.getEmail())) {
+    public UserResponse create(@Valid UserRequest userDto) {
+        if (userRepository.existsByEmailIgnoreCase(userDto.getEmail())) {
             log.error("Email already exists {}", userDto.getEmail());
             throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
         }
-        var newUser = userRepository.save(userMapper.toEntity(userDto));
+
+        var newUser = User.builder()
+                .email(userDto.getEmail())
+                .role(userDto.getRole())
+                .fullName(userDto.getFullName())
+                .password(encoder.encode(userDto.getPassword()))
+                .tokenVersion(0)
+                .build();
+
+        var savedUser = userRepository.save(newUser);
         log.debug("Created new user {}", newUser);
 
-        return userMapper.toDto(newUser);
+        return userMapper.toDto(savedUser);
     }
 
     @Override
-    public UserResponse updateUser(@Valid UserRequest userDto, Long id) {
+    public UserResponse update(@Valid UserRequest userDto, Long id) {
         return userRepository.findById(id)
                 .map(existingUser -> {
                     if (!existingUser.getEmail().equals(userDto.getEmail())
-                            && userRepository.existsByEmail(userDto.getEmail())) {
+                            && userRepository.existsByEmailIgnoreCase(userDto.getEmail())) {
                         log.error("Email already exists {}", userDto.getEmail());
                         throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
                     }
@@ -71,7 +83,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void deleteUser(Long id) {
+    public void delete(Long id) {
         if (!userRepository.existsById(id)) {
             log.error("User not found with id {}", id);
             throw new ResourceNotFoundException("User not found with id: " + id);
@@ -82,7 +94,7 @@ public class UserServiceImpl implements UserService {
 
     @Transactional(readOnly = true)
     @Override
-    public PagedResponse<UserResponse> getPagedUsers(int pageNo, int pageSize, String sortBy, String sortDir) {
+    public PagedResponse<UserResponse> getPage(int pageNo, int pageSize, String sortBy, String sortDir) {
         log.info("page params : {}, {}, {}, {}", pageNo, pageSize, sortBy, sortDir);
 
         var direction = Sort.Direction.fromOptionalString(sortDir).orElse(Sort.Direction.ASC);
@@ -105,5 +117,18 @@ public class UserServiceImpl implements UserService {
                 pagedUsers.getTotalElements(),
                 pagedUsers.getTotalPages()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public User findByEmailForLogin(String email) {
+        return userRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + email));
+    }
+
+    public void incrementTokenVersion(Long id) {
+        var user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+
+        user.setTokenVersion(user.getTokenVersion() + 1);
     }
 }
