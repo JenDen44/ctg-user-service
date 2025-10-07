@@ -15,7 +15,7 @@ public class InternalUserController {
 
     @GetMapping("/users/by-email")
     public ResponseEntity<LoginLookupResponse> byEmail(@RequestParam String email) {
-        User user = service.findByEmailForLogin(email.toLowerCase());
+        User user = service.findByEmail(email.toLowerCase());
         return ResponseEntity.ok(new LoginLookupResponse(
                 user.getId(), user.getEmail(), user.getPassword(), user.getRole(), user.getTokenVersion()
         ));

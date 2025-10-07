@@ -43,7 +43,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserResponse create(@Valid UserRequest userDto) {
-        if (userRepository.existsByEmailIgnoreCase(userDto.getEmail())) {
+        if (userRepository.existsByEmail(userDto.getEmail())) {
             log.error("Email already exists {}", userDto.getEmail());
             throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
         }
@@ -63,11 +63,11 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserResponse update(@Valid UserRequest userDto, Long id) {
+    public UserResponse update(Long id, @Valid UserRequest userDto) {
         return userRepository.findById(id)
                 .map(existingUser -> {
                     if (!existingUser.getEmail().equals(userDto.getEmail())
-                            && userRepository.existsByEmailIgnoreCase(userDto.getEmail())) {
+                            && userRepository.existsByEmail(userDto.getEmail())) {
                         log.error("Email already exists {}", userDto.getEmail());
                         throw new ValidationException(List.of(new ErrorField("email", "Email already exists")));
                     }
@@ -94,7 +94,7 @@ public class UserServiceImpl implements UserService {
 
     @Transactional(readOnly = true)
     @Override
-    public PagedResponse<UserResponse> getPage(int pageNo, int pageSize, String sortBy, String sortDir) {
+    public PagedResponse<UserResponse> getByPage(int pageNo, int pageSize, String sortBy, String sortDir) {
         log.info("page params : {}, {}, {}, {}", pageNo, pageSize, sortBy, sortDir);
 
         var direction = Sort.Direction.fromOptionalString(sortDir).orElse(Sort.Direction.ASC);
@@ -120,8 +120,8 @@ public class UserServiceImpl implements UserService {
     }
 
     @Transactional(readOnly = true)
-    public User findByEmailForLogin(String email) {
-        return userRepository.findByEmailIgnoreCase(email)
+    public User findByEmail(String email) {
+        return userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + email));
     }
 

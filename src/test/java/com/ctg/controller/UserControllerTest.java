@@ -82,7 +82,7 @@ class UserControllerTest {
     @DisplayName("GET /users with params — 200 OK")
     void getPagedUsersWithParams() throws Exception {
         var pagedResponse = TestUserFactory.pagedResponse();
-        given(userService.getPage(anyInt(), anyInt(), anyString(), anyString()))
+        given(userService.getByPage(anyInt(), anyInt(), anyString(), anyString()))
                 .willReturn(pagedResponse);
 
         mockMvc.perform(get(MAIN_PATH)
@@ -97,7 +97,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.totalElements").value(pagedResponse.getTotalElements()))
                 .andExpect(jsonPath("$.totalPages").value(pagedResponse.getTotalPages()));
 
-        verify(userService).getPage(anyInt(), anyInt(), anyString(), anyString());
+        verify(userService).getByPage(anyInt(), anyInt(), anyString(), anyString());
     }
 
     @Test
@@ -105,7 +105,7 @@ class UserControllerTest {
     void getPagedUsersWithDefaultParams() throws Exception {
         var pagedResponse = TestUserFactory.pagedResponse();
 
-        given(userService.getPage(anyInt(), anyInt(), anyString(), anyString()))
+        given(userService.getByPage(anyInt(), anyInt(), anyString(), anyString()))
                 .willReturn(pagedResponse);
 
         mockMvc.perform(get(MAIN_PATH))
@@ -116,7 +116,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.totalElements").value(pagedResponse.getTotalElements()))
                 .andExpect(jsonPath("$.totalPages").value(pagedResponse.getTotalPages()));
 
-        verify(userService).getPage(anyInt(), anyInt(), anyString(), anyString());
+        verify(userService).getByPage(anyInt(), anyInt(), anyString(), anyString());
     }
 
     @Test
@@ -195,7 +195,7 @@ class UserControllerTest {
     void updateUserOk() throws Exception {
         var request = TestUserFactory.createUserRequest();
         var response = TestUserFactory.createUserResponse(userId, request);
-        given(userService.update(any(UserRequest.class), eq(userId))).willReturn(response);
+        given(userService.update(eq(userId), any(UserRequest.class))).willReturn(response);
 
         mockMvc.perform(put(MAIN_PATH_ID, userId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -206,7 +206,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.email").value(response.getEmail()))
                 .andExpect(jsonPath("$.role").value(response.getRole().name()));
 
-        verify(userService).update(any(UserRequest.class), anyLong());
+        verify(userService).update(anyLong(), any(UserRequest.class));
     }
 
     @DisplayName("PUT /users/{id} — USER NOT FOUND")
@@ -215,7 +215,7 @@ class UserControllerTest {
         String message = "User not found with id: " + userId;
         var request = TestUserFactory.createUserRequest();
         doThrow(new ResourceNotFoundException(message))
-                .when(userService).update(any(UserRequest.class), eq(userId));
+                .when(userService).update(eq(userId), any(UserRequest.class));
 
         mockMvc.perform(put(MAIN_PATH_ID, userId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -223,7 +223,7 @@ class UserControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(message));
 
-        verify(userService).update(any(UserRequest.class), anyLong());
+        verify(userService).update(anyLong(), any(UserRequest.class));
     }
 
     @Test
@@ -239,7 +239,7 @@ class UserControllerTest {
                         .content(brokenJson))
                 .andExpect(status().isBadRequest());
 
-        verify(userService, never()).update(any(UserRequest.class), anyLong());
+        verify(userService, never()).update(anyLong(), any(UserRequest.class));
     }
 
     @ParameterizedTest
@@ -248,7 +248,7 @@ class UserControllerTest {
     void updateUserWithInvalidEmails(String email) throws Exception {
         var request = TestUserFactory.createUserRequestWithEmail(email);
         doThrow(new ValidationException(List.of(new ErrorField("email", "Email should be valid"))))
-                .when(userService).update(request, userId);
+                .when(userService).update(userId, request);
 
         mockMvc.perform(put(MAIN_PATH_ID, userId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -256,7 +256,7 @@ class UserControllerTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.fields[0].field").value("email"));
 
-        verify(userService, never()).update(any(UserRequest.class), anyLong());
+        verify(userService, never()).update(anyLong(), any(UserRequest.class));
     }
 
     @ParameterizedTest
@@ -266,7 +266,7 @@ class UserControllerTest {
         var request = TestUserFactory.createUserRequestWithPassword(password);
 
         doThrow(new ValidationException(List.of(new ErrorField("password", "Password must be 8-100 characters"))))
-                .when(userService).update(request, userId);
+                .when(userService).update(userId, request);
 
         mockMvc.perform(post(MAIN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -274,7 +274,7 @@ class UserControllerTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.fields[0].field").value("password"));
 
-        verify(userService, never()).update(any(UserRequest.class), anyLong());
+        verify(userService, never()).update(anyLong(), any(UserRequest.class));
     }
 
     @Test

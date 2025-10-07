@@ -28,7 +28,7 @@ public class UserController {
             @RequestParam(value = "sortDir",
                     defaultValue = PaginationConstants.DEFAULT_SORT_DIR, required = false) String sortDir
     ) {
-       return userService.getPage(page, size, sort, sortDir);
+       return userService.getByPage(page, size, sort, sortDir);
     }
 
     @GetMapping("/{id}")
@@ -44,7 +44,7 @@ public class UserController {
 
     @PutMapping("/{id}")
     public UserResponse update(@Valid @RequestBody UserRequest updatedUser, @PathVariable("id") Long id) {
-        return userService.update(updatedUser, id);
+        return userService.update(id, updatedUser);
     }
 
     @DeleteMapping("/{id}")

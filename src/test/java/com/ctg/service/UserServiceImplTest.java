@@ -102,7 +102,7 @@ class UserServiceImplTest {
         when(userRepo.findAll(any(PageRequest.class))).thenReturn(userPage);
         when(userMapper.toDto(entity)).thenReturn(response);
 
-        PagedResponse<UserResponse> pagedResponse = userService.getPage(page, size, sortBy, sortDir);
+        PagedResponse<UserResponse> pagedResponse = userService.getByPage(page, size, sortBy, sortDir);
 
         List<UserResponse> pageContent = pagedResponse.getContent();
         UserResponse first = pageContent.getFirst();
@@ -132,7 +132,7 @@ class UserServiceImplTest {
 
         when(userRepo.findAll(any(PageRequest.class))).thenReturn(userPage);
 
-        PagedResponse<UserResponse> pagedResponse = userService.getPage(page, size, sortBy, sortDir);
+        PagedResponse<UserResponse> pagedResponse = userService.getByPage(page, size, sortBy, sortDir);
 
         assertAll("found paged user",
                 () -> assertNotNull(pagedResponse),
@@ -148,7 +148,7 @@ class UserServiceImplTest {
     @Test
     @DisplayName("Create user — created")
     void createUserCreated() {
-        when(userRepo.existsByEmailIgnoreCase(request.getEmail())).thenReturn(false);
+        when(userRepo.existsByEmail(request.getEmail())).thenReturn(false);
         when(encoder.encode(request.getPassword())).thenReturn("hashedPwd");
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         when(userRepo.save(any(User.class)))
@@ -169,7 +169,7 @@ class UserServiceImplTest {
                 () -> assertEquals(result.getEmail(), response.getEmail())
         );
 
-        verify(userRepo, times(1)).existsByEmailIgnoreCase(request.getEmail());
+        verify(userRepo, times(1)).existsByEmail(request.getEmail());
         verify(userRepo, times(1)).save(userCaptor.capture());
         verify(userMapper, times(1)).toDto(userCaptor.capture());
         verify(encoder, times(1)).encode(request.getPassword());
@@ -178,7 +178,7 @@ class UserServiceImplTest {
     @Test
     @DisplayName("Create user — email already exists")
     void createUserEmailAlreadyExists() {
-        when(userRepo.existsByEmailIgnoreCase(response.getEmail())).thenReturn(true);
+        when(userRepo.existsByEmail(response.getEmail())).thenReturn(true);
 
         ValidationException ex = catchThrowableOfType(
                 () -> userService.create(request),
@@ -189,7 +189,7 @@ class UserServiceImplTest {
                 .extracting(ErrorField::getField)
                 .containsExactly("email");
 
-        verify(userRepo, times(1)).existsByEmailIgnoreCase(request.getEmail());
+        verify(userRepo, times(1)).existsByEmail(request.getEmail());
         verify(userMapper, never()).toEntity(request);
         verify(userRepo, never()).save(any());
     }
@@ -200,10 +200,10 @@ class UserServiceImplTest {
         UserRequest updatedEmail = TestUserFactory.createUserRequestWithEmail("updatedEmail@yandex.com");
         UserResponse updatedResponse = TestUserFactory.createUserResponse(userId, updatedEmail);
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
-        when(userRepo.existsByEmailIgnoreCase(updatedEmail.getEmail())).thenReturn(false);
+        when(userRepo.existsByEmail(updatedEmail.getEmail())).thenReturn(false);
         when(userMapper.toDto(entity)).thenReturn(updatedResponse);
 
-        UserResponse result = userService.update(updatedEmail, userId);
+        UserResponse result = userService.update(userId, updatedEmail);
 
         assertAll("updated user",
                 () -> assertNotNull(result),
@@ -214,7 +214,7 @@ class UserServiceImplTest {
         );
 
         verify(userRepo, times(1)).findById(userId);
-        verify(userRepo, times(1)).existsByEmailIgnoreCase(updatedEmail.getEmail());
+        verify(userRepo, times(1)).existsByEmail(updatedEmail.getEmail());
         verify(userMapper, times(1)).toDto(entity);
     }
 
@@ -223,10 +223,10 @@ class UserServiceImplTest {
     void updateUserEmailAlreadyExists() {
         UserRequest updatedUser = TestUserFactory.createUserRequestWithEmail("changedEmail@yandex.ru");
         when(userRepo.findById(userId)).thenReturn(Optional.of(entity));
-        when(userRepo.existsByEmailIgnoreCase(updatedUser.getEmail())).thenReturn(true);
+        when(userRepo.existsByEmail(updatedUser.getEmail())).thenReturn(true);
 
         ValidationException ex = catchThrowableOfType(
-                () -> userService.update(updatedUser, userId),
+                () -> userService.update(userId, updatedUser),
                 ValidationException.class
         );
 
@@ -235,7 +235,7 @@ class UserServiceImplTest {
                 .containsExactly("email");
 
         verify(userRepo, times(1)).findById(userId);
-        verify(userRepo, times(1)).existsByEmailIgnoreCase(updatedUser.getEmail());
+        verify(userRepo, times(1)).existsByEmail(updatedUser.getEmail());
         verify(userMapper, never()).toDto(entity);
     }
 
@@ -266,9 +266,9 @@ class UserServiceImplTest {
 
     @DisplayName("findByEmailForLogin - found")
     void findByEmailFound() {
-        when(userRepo.findByEmailIgnoreCase(entity.getEmail())).thenReturn(Optional.of(entity));
+        when(userRepo.findByEmail(entity.getEmail())).thenReturn(Optional.of(entity));
 
-       User foundUser = userService.findByEmailForLogin(entity.getEmail());
+       User foundUser = userService.findByEmail(entity.getEmail());
 
         assertThat(foundUser).isEqualTo(entity);
     }
@@ -277,9 +277,9 @@ class UserServiceImplTest {
     @DisplayName("findByEmailForLogin - not found")
     void findByEmailNotFound() {
         String notExistingEmail = "notExistingEmail@mail.com";
-        when(userRepo.findByEmailIgnoreCase(notExistingEmail)).thenReturn(Optional.empty());
+        when(userRepo.findByEmail(notExistingEmail)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.findByEmailForLogin(notExistingEmail))
+        assertThatThrownBy(() -> userService.findByEmail(notExistingEmail))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
