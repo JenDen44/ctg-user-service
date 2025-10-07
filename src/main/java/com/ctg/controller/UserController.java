@@ -28,29 +28,29 @@ public class UserController {
             @RequestParam(value = "sortDir",
                     defaultValue = PaginationConstants.DEFAULT_SORT_DIR, required = false) String sortDir
     ) {
-       return userService.getPagedUsers(page, size, sort, sortDir);
+       return userService.getByPage(page, size, sort, sortDir);
     }
 
     @GetMapping("/{id}")
-    public UserResponse getUser(@PathVariable("id") Long id) {
-        return userService.getUser(id);
+    public UserResponse get(@PathVariable("id") Long id) {
+        return userService.get(id);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse createNewUser(@Valid @RequestBody UserRequest newUser) {
-        return userService.createUser(newUser);
+    public UserResponse create(@Valid @RequestBody UserRequest newUser) {
+        return userService.create(newUser);
     }
 
     @PutMapping("/{id}")
-    public UserResponse updateUser(@Valid @RequestBody UserRequest updatedUser, @PathVariable("id") Long id) {
-        return userService.updateUser(updatedUser, id);
+    public UserResponse update(@Valid @RequestBody UserRequest updatedUser, @PathVariable("id") Long id) {
+        return userService.update(id, updatedUser);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteUser(@PathVariable("id") Long id) {
-        userService.deleteUser(id);
+    public void delete(@PathVariable("id") Long id) {
+        userService.delete(id);
     }
 
 /*    @GetMapping("/current")

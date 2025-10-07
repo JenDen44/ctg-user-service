@@ -2,8 +2,8 @@ package com.ctg.handler;
 
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
-import com.ctg.model.ErrorField;
-import com.ctg.model.ErrorResponse;
+import com.ctg.dto.ErrorField;
+import com.ctg.dto.ErrorResponse;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import org.springframework.http.HttpStatus;
