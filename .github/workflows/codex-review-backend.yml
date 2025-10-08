@@ -1,0 +1,504 @@
+name: Codex Comment-Triggered PR-wide Review (Backend)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    if: >
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/review')
+    runs-on: ubuntu-latest
+
+    env:
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'o4-mini' }}
+      PR_NUMBER: ${{ github.event.issue.number }}
+
+    steps:
+      - name: Контекст
+        run: |
+          echo "COMMENT_URL=${{ github.event.comment.html_url }}" >> $GITHUB_ENV
+          echo "REPO=${{ github.repository }}" >> $GITHUB_ENV
+          echo "API=${{ github.api_url }}" >> $GITHUB_ENV
+
+      # ========= Checkout PR HEAD (актуальные файлы PR) =========
+      - name: Checkout PR HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
+          fetch-depth: 0
+
+      # ========= Сообщение о старте =========
+      - name: Сообщение о старте ревью
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "🤖 Codex: начал backend-ревью этого PR.",
+              "",
+              `_Запущено из ${process.env.COMMENT_URL}_`
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body
+            });
+
+      # ========= OpenAI key hardening =========
+      - name: Debug OPENAI key length (masked)
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "EMPTY OPENAI_API_KEY secret"; exit 1;
+          fi
+          echo "OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Normalize OPENAI_API_KEY
+        run: |
+          CLEAN=$(printf "%s" "${OPENAI_API_KEY}" | tr -d '\r' | sed 's/[[:space:]]//g')
+          if [ -z "$CLEAN" ]; then echo "Empty OPENAI_API_KEY after trim"; exit 1; fi
+          echo "OPENAI_API_KEY_CLEAN=$CLEAN" >> $GITHUB_ENV
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: OpenAI auth smoke-test
+        run: |
+          set -euo pipefail
+          curl -sS https://api.openai.com/v1/models \
+            -H "Authorization: Bearer $OPENAI_API_KEY_CLEAN" \
+            -H "Content-Type: application/json" \
+            -o models.json -w "\nHTTP:%{http_code}\n"
+          if jq -e '.error' models.json >/dev/null; then
+            echo "OpenAI error:"; cat models.json; exit 1
+          fi
+          echo "OK: auth passed ✅"
+
+      # ========= Получение диффов через API (для компактного анализа и inline позиций) =========
+      - name: Получение полного diff PR
+        id: globaldiff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PR=$PR_NUMBER
+          curl -sSL \
+            -H "Accept: application/vnd.github.v3.diff" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/pulls/${PR}" > global.diff
+
+          MAX=160000
+          if [ $(wc -c < global.diff) -gt $MAX ]; then
+            head -c $MAX global.diff > global_trimmed.diff
+            mv global_trimmed.diff global.diff
+            echo "TRUNCATED=true" >> $GITHUB_ENV
+          else
+            echo "TRUNCATED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Получение патчей по файлам (для inline-комментов)
+        id: files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PR=$PR_NUMBER
+          API="${{ github.api_url }}/repos/${{ github.repository }}/pulls/${PR}/files?per_page=100&page="
+          page=1
+          echo "[]" > files.json
+          while :; do
+            RESP=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "${API}${page}")
+            COUNT=$(echo "$RESP" | jq 'length')
+            jq -s 'add' files.json <(echo "$RESP") > tmp.json && mv tmp.json files.json
+            [ "$COUNT" -lt 100 ] && break
+            page=$((page+1))
+          done
+          jq '[ .[] | {path: .filename, status: .status, patch: .patch} | select(.patch != null) ]' files.json > patches.json
+          echo "Получено $(jq 'length' patches.json) текстовых патчей"
+
+      # ========= Java/Kotlin toolchain =========
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Выявить сборщик (Gradle/Maven)
+        id: buildtool
+        run: |
+          if [ -f "./gradlew" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "tool=gradle" >> $GITHUB_OUTPUT
+          elif [ -f "pom.xml" ]; then
+            echo "tool=maven" >> $GITHUB_OUTPUT
+          else
+            echo "tool=none" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cache Gradle
+        if: steps.buildtool.outputs.tool == 'gradle'
+        uses: gradle/actions/setup-gradle@v3
+
+      # ========= Backend build + tests =========
+      - name: Backend build & tests
+        id: test
+        run: |
+          set -euo pipefail
+          TOOL="${{ steps.buildtool.outputs.tool }}"
+          echo "detected=$TOOL"
+          if [ "$TOOL" = "gradle" ]; then
+            chmod +x ./gradlew || true
+            ./gradlew --no-daemon clean test -i
+          elif [ "$TOOL" = "maven" ]; then
+            mvn -B -e -DskipITs=false -DskipTests=false clean test
+          else
+            echo "Не найден Gradle/Maven. Пропускаю build/tests." >&2
+          fi
+        continue-on-error: true
+
+      - name: Сбор краткого отчёта о тестах
+        id: tests_summary
+        run: |
+          # Поищем стандартные каталоги отчётов Gradle/Maven и вытащим пару чисел
+          PASSED=0; FAILED=0; SKIPPED=0
+          # Gradle
+          if [ -d "**/build/test-results/test" ] || ls -d */build/test-results/test >/dev/null 2>&1; then
+            for f in $(find . -path "*/build/test-results/test/*.xml"); do
+              p=$(xmllint --xpath "string(/testsuite/@tests)" "$f" 2>/dev/null || echo 0)
+              f1=$(xmllint --xpath "string(/testsuite/@failures)" "$f" 2>/dev/null || echo 0)
+              e1=$(xmllint --xpath "string(/testsuite/@errors)" "$f" 2>/dev/null || echo 0)
+              s=$(xmllint --xpath "string(/testsuite/@skipped)" "$f" 2>/dev/null || echo 0)
+              PASSED=$((PASSED + p - f1 - e1 - s))
+              FAILED=$((FAILED + f1 + e1))
+              SKIPPED=$((SKIPPED + s))
+            done
+          fi
+          # Maven surefire
+          if ls -d */target/surefire-reports >/dev/null 2>&1; then
+            for f in $(find . -path "*/target/surefire-reports/*.xml"); do
+              p=$(xmllint --xpath "string(/testsuite/@tests)" "$f" 2>/dev/null || echo 0)
+              f1=$(xmllint --xpath "string(/testsuite/@failures)" "$f" 2>/dev/null || echo 0)
+              e1=$(xmllint --xpath "string(/testsuite/@errors)" "$f" 2>/dev/null || echo 0)
+              s=$(xmllint --xpath "string(/testsuite/@skipped)" "$f" 2>/dev/null || echo 0)
+              PASSED=$((PASSED + p - f1 - e1 - s))
+              FAILED=$((FAILED + f1 + e1))
+              SKIPPED=$((SKIPPED + s))
+            done
+          fi
+          echo "passed=$PASSED"  >> $GITHUB_OUTPUT
+          echo "failed=$FAILED"  >> $GITHUB_OUTPUT
+          echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
+
+      # ========= (Опционально) линтеры, если подключены в билд-скриптах =========
+      - name: Java/Kotlin linters (Spotless/Checkstyle/PMD/Detekt/ktlint)
+        id: linters
+        run: |
+          set -euo pipefail
+          TOOL="${{ steps.buildtool.outputs.tool }}"
+          CODE=0
+          if [ "$TOOL" = "gradle" ]; then
+            ./gradlew --no-daemon -i \
+              spotlessCheck || CODE=$?
+            ./gradlew --no-daemon -i \
+              checkstyleMain checkstyleTest pmdMain pmdTest detekt || true
+          elif [ "$TOOL" = "maven" ]; then
+            mvn -B -Dspotless.check.skip=false spotless:check || CODE=$?
+            mvn -B checkstyle:check || true
+            mvn -B pmd:check || true
+          fi
+          echo "lint_exit=$CODE" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      # ========= OpenAI inference (backend prompt) =========
+      - name: Генерация AI-предложений (inline + общие)
+        id: ai
+        env:
+          OPENAI_MODEL: ${{ env.OPENAI_MODEL }}
+        run: |
+          set -euo pipefail
+
+          MODEL="${OPENAI_MODEL}"
+          GLOBAL=$(jq -Rs . < global.diff)
+
+          SYS_PROMPT=$(cat << 'EOF'
+          Ты — сеньор Backend-инженер (Java/Kotlin, Spring Boot, REST, SQL, транзакции, безопасность).
+          ВАЖНО: отвечай ТОЛЬКО на русском.
+          Анализируй PR unified diff и давай практичные рекомендации:
+          - корректность REST/DTO/валидации; преобразование ошибок;
+          - транзакционность (@Transactional), потоки данных, N+1, ленивые загрузки, JDBC/ORM/JPQL;
+          - конфигурация Spring (profiles, properties), безопасность (Spring Security), секреты;
+          - производительность (алгоритмы, индексы, batch), надёжность (timeouts, retries);
+          - логирование и наблюдаемость (structured logs, correlation id);
+          - тестируемость (unit/integration), фикстуры; mock vs slice;
+          - чистота кода и архитектура (слои, пакеты, циклические зависимости), стиль.
+          
+          Верни СТРОГО валидный JSON БЕЗ пояснений, Markdown или текста.
+          Формат:
+          {
+            "inline": [
+              {"path":"...", "match":"<точная_добавленная_строка_из_patch>", "message":"...", "severity":"nit|suggestion|warn|error"}
+            ],
+            "general": [
+              {"message":"...", "severity":"nit|suggestion|warn|error"}
+            ]
+          }
+          EOF
+          )
+
+          REQ=$(jq -n \
+            --arg model "$MODEL" \
+            --arg sys "$SYS_PROMPT" \
+            --arg content "PR unified diff:\n\n$GLOBAL" \
+            '{
+              model: $model,
+              max_completion_tokens: 2000,
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: $sys },
+                { role: "user",   content: $content }
+              ]
+            }')
+
+          curl -sS https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY_CLEAN" \
+            -d "$REQ" \
+            -o openai_response.json
+
+          if jq -e '.error' openai_response.json >/dev/null 2>&1; then
+            jq -r '.error' openai_response.json > openai_error.json || true
+            echo '{"inline":[],"general":[{"message":"OpenAI API error: '"$(jq -r '.message // "unknown"' openai_error.json 2>/dev/null)"'","severity":"warn"}]}' > suggestions.json
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            jq -r '.error | tostring' openai_response.json > raw_model_response.txt || echo "" > raw_model_response.txt
+          else
+            if jq -e '.choices[0].message.content | fromjson' openai_response.json >/dev/null 2>&1; then
+              jq -r '.choices[0].message.content | fromjson' openai_response.json > suggestions.json
+              echo "valid=true" >> "$GITHUB_OUTPUT"
+              jq -r '.choices[0].message.content' openai_response.json | head -c 800 > raw_model_response.txt || echo "" > raw_model_response.txt
+            else
+              jq -r '.choices[0].message.content // ""' openai_response.json | head -c 800 > raw_model_response.txt || echo "" > raw_model_response.txt
+              echo '{"inline":[],"general":[{"message":"Модель вернула невалидный JSON или пустой ответ.","severity":"warn"}]}' > suggestions.json
+              echo "valid=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          jq '{
+                inline: ( .inline // [] | (if type=="array" then . else [] end) ),
+                general:( .general // [] | (if type=="array" then . else [] end) )
+              }' suggestions.json > suggestions.normalized.json
+          mv suggestions.normalized.json suggestions.json
+
+          echo "raw_file=raw_model_response.txt" >> "$GITHUB_OUTPUT"
+
+      # ========= Оценка стоимости =========
+      - name: Оценка стоимости ревью
+        id: cost
+        env:
+          OPENAI_MODEL: ${{ env.OPENAI_MODEL }}
+        run: |
+          set -euo pipefail
+          DIFF_BYTES=$(wc -c < global.diff)
+          OVERHEAD=1600
+          IN_TOK=$(( (DIFF_BYTES + OVERHEAD) / 4 ))
+          if [ -f raw_model_response.txt ]; then
+            OUT_BYTES=$(wc -c < raw_model_response.txt)
+          else
+            OUT_BYTES=0
+          fi
+          OUT_TOK=$(( OUT_BYTES / 4 ))
+          if [ $OUT_TOK -lt 100 ]; then OUT_TOK=100; fi
+
+          MODEL="${OPENAI_MODEL}"
+          case "$MODEL" in
+            o4-mini|gpt-4o-mini|gpt-4.1-mini) IN_PPM=0.00013; OUT_PPM=0.00050 ;;
+            gpt-4o) IN_PPM=0.00500; OUT_PPM=0.01500 ;;
+            gpt-4-turbo*) IN_PPM=0.01000; OUT_PPM=0.03000 ;;
+            *) IN_PPM=0.00013; OUT_PPM=0.00050 ;;
+          esac
+
+          COST=$(awk -v in_t=$IN_TOK -v out_t=$OUT_TOK -v in_p=$IN_PPM -v out_p=$OUT_PPM 'BEGIN{printf "%.4f", (in_t/1000.0)*in_p + (out_t/1000.0)*out_p}')
+          echo "input_tokens=$IN_TOK" >> $GITHUB_OUTPUT
+          echo "output_tokens=$OUT_TOK" >> $GITHUB_OUTPUT
+          echo "cost_usd=$COST" >> $GITHUB_OUTPUT
+
+      # ========= Диагностика ответа модели (если невалиден) =========
+      - name: Диагностика ответа модели (если невалиден)
+        if: steps.ai.outputs.valid != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const prNumber = Number(process.env.PR_NUMBER);
+            let raw = '';
+            try { raw = fs.readFileSync('raw_model_response.txt','utf8'); } catch {}
+            const preview = (raw || '').slice(0, 800);
+            const body = [
+              "⚠️ Codex: ответ модели не распарсился в JSON. Использую дефолт без инлайн-комментариев.",
+              "",
+              "Короткий лог (обрезано до 800 символов):",
+              "",
+              "```",
+              preview || "<пусто>",
+              "```",
+              "",
+              "_Запущено из " + process.env.COMMENT_URL + "_"
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body
+            });
+
+      # ========= Публикация комментариев =========
+      - name: Создание ревью в GitHub (inline) + общий комментарий
+        id: publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            function readJsonObject(path) {
+              try {
+                if (!fs.existsSync(path)) return {};
+                const raw = String(fs.readFileSync(path, 'utf8') || '').trim();
+                if (!raw) return {};
+                const data = JSON.parse(raw);
+                return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+              } catch (e) { return {}; }
+            }
+
+            const prNumber = Number(process.env.PR_NUMBER);
+            const truncated = process.env.TRUNCATED === 'true';
+            const sug = readJsonObject('suggestions.json');
+            const inline = Array.isArray(sug.inline) ? sug.inline : [];
+            const general = Array.isArray(sug.general) ? sug.general : [];
+
+            let patches = [];
+            try {
+              const rawP = fs.readFileSync('patches.json','utf8');
+              const parsed = JSON.parse(rawP);
+              patches = Array.isArray(parsed) ? parsed : [];
+            } catch {}
+
+            const patchMap = new Map();
+            for (const f of patches) {
+              if (!f.path || typeof f.patch !== 'string') continue;
+              patchMap.set(f.path, f.patch.split('\n'));
+            }
+
+            function findPosition(lines, wanted) {
+              if (!Array.isArray(lines) || !wanted) return null;
+              const want = String(wanted).trim();
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i] || '';
+                if (!line.startsWith('+') || line.startsWith('+++')) continue;
+                const added = line.slice(1).trim();
+                if (added === want) return i + 1;
+              }
+              return null;
+            }
+
+            const sevEmoji = s => ({nit:'🧹',suggestion:'💡',warn:'⚠️',error:'🚨'})[String(s||'').toLowerCase()] || '💬';
+
+            const comments = [];
+            for (const it of inline) {
+              if (!it || typeof it !== 'object') continue;
+              const { path, match, message, severity } = it;
+              const lines = patchMap.get(path);
+              if (!lines) continue;
+              const pos = findPosition(lines, match);
+              if (!pos) continue;
+              const body = `${sevEmoji(severity)} ${message || 'Проверьте эту строку.'}`;
+              comments.push({ path, position: pos, body });
+            }
+
+            if (comments.length > 0) {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                event: 'COMMENT',
+                body: `🤖 Codex инлайн-ревью • ${comments.length} комментариев\n_Запущено из ${process.env.COMMENT_URL}_`,
+                comments
+              });
+            }
+
+            // Сводка тестов/линтеров:
+            const passed = Number('${{ steps.tests_summary.outputs.passed || 0 }}');
+            const failed = Number('${{ steps.tests_summary.outputs.failed || 0 }}');
+            const skipped = Number('${{ steps.tests_summary.outputs.skipped || 0 }}');
+            const lintExit = Number('${{ steps.linters.outputs.lint_exit || 0 }}');
+
+            let generalBody = '';
+            const lines = [];
+
+            if (general.length > 0) {
+              lines.push(`### 🤖 Codex обзор PR (общие замечания)`);
+              for (const g of general) lines.push(`- ${sevEmoji(g.severity)} ${g.message}`);
+              lines.push('');
+            }
+            lines.push(`### 🧪 Тесты`);
+            lines.push(`- passed: ${passed}, failed: ${failed}, skipped: ${skipped}`);
+            lines.push('');
+            lines.push(`### 🧹 Линтеры`);
+            lines.push(`- exit code: ${lintExit} (0 — ок, !=0 — есть замечания)`);
+
+            if (truncated) lines.push(`\n> ⚠️ Дифф был усечён по размеру для анализа.`);
+            lines.push(`\n_Запущено из ${process.env.COMMENT_URL}_`);
+
+            generalBody = lines.join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: generalBody
+            });
+
+            core.setOutput('inline_count', String(comments.length));
+            core.setOutput('general_count', String(general.length));
+            core.setOutput('truncated', truncated ? 'true' : 'false');
+
+      - name: Завершено
+        run: |
+          echo "Ревью опубликовано для PR #$PR_NUMBER"
+
+      - name: Сообщение о завершении ревью (с счётчиком + пинг автора + стоимость)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const inlineCount = Number('${{ steps.publish.outputs.inline_count || 0 }}');
+            const generalCount = Number('${{ steps.publish.outputs.general_count || 0 }}');
+            const truncated = '${{ steps.publish.outputs.truncated || 'false' }}' === 'true';
+            const actor = process.env.GITHUB_ACTOR || '${{ github.actor }}';
+            const cost = '${{ steps.cost.outputs.cost_usd || '0.0000' }}';
+            const inTok = '${{ steps.cost.outputs.input_tokens || '0' }}';
+            const outTok = '${{ steps.cost.outputs.output_tokens || '0' }}';
+            const model = '${{ env.OPENAI_MODEL }}';
+
+            const parts = [
+              `🤖 Codex: ревью завершено ✅`,
+              ``,
+              `Итог: ${inlineCount} инлайн, ${generalCount} общих замечаний.` + (truncated ? `\n> ⚠️ Дифф был усечён для анализа.` : ''),
+              ``,
+              `Оценка стоимости: ~ $${cost} (in: ${inTok} tok, out: ${outTok} tok, model: ${model})`,
+              ``,
+              `Запустил: @${actor}`,
+              ``,
+              `_Запущено из ${process.env.COMMENT_URL}_`
+            ];
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body: parts.join("\n")
+            });
