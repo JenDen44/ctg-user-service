@@ -8,6 +8,8 @@ import com.ctg.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -53,8 +55,8 @@ public class UserController {
         userService.delete(id);
     }
 
-/*    @GetMapping("/current")
-    public UserDto getCurrentUser() {
-        подумать как реализовать
-    }*/
+    @GetMapping("/current")
+    public UserResponse current(@AuthenticationPrincipal Jwt jwt) {
+        return userService.getCurrent(jwt);
+    }
 }

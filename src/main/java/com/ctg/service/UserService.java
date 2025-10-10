@@ -1,9 +1,10 @@
 package com.ctg.service;
 
+import com.ctg.dto.LoginUserResponse;
 import com.ctg.dto.PagedResponse;
 import com.ctg.dto.UserRequest;
 import com.ctg.dto.UserResponse;
-import com.ctg.model.User;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 public interface UserService {
     UserResponse get(Long id);
@@ -11,6 +12,8 @@ public interface UserService {
     UserResponse update(Long id, UserRequest updatedUser);
     void delete(Long id);
     PagedResponse<UserResponse> getByPage(int pageNo, int pageSize, String sortBy, String sortDir);
-    User findByEmail(String email);
+    LoginUserResponse findByEmailForLogin(String email);
     void incrementTokenVersion(Long id);
+    UserResponse getByEmail(String email);
+    UserResponse getCurrent(Jwt jwt);
 }
