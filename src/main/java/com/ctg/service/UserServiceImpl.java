@@ -1,20 +1,19 @@
 package com.ctg.service;
 
-import com.ctg.dto.PagedResponse;
-import com.ctg.dto.UserRequest;
-import com.ctg.dto.UserResponse;
+import com.ctg.dto.*;
 import com.ctg.exceptions.ResourceNotFoundException;
 import com.ctg.exceptions.ValidationException;
-import com.ctg.dto.ErrorField;
 import com.ctg.model.User;
 import com.ctg.repository.UserRepository;
 import com.ctg.mapper.UserMapper;
+import com.ctg.security.CurrentUserIdExtractor;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +28,7 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     private final PasswordEncoder encoder;
+    private final CurrentUserIdExtractor currentUserIdExtractor;
 
     @Override
     @Transactional(readOnly = true)
@@ -120,9 +120,17 @@ public class UserServiceImpl implements UserService {
     }
 
     @Transactional(readOnly = true)
-    public User findByEmail(String email) {
-        return userRepository.findByEmail(email)
+    public LoginUserResponse findByEmailForLogin(String email) {
+        User foundUser = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + email));
+
+        return LoginUserResponse.builder()
+                .id(foundUser.getId())
+                .email(foundUser.getEmail())
+                .passwordHash(foundUser.getPassword())
+                .role(foundUser.getRole())
+                .tokenVersion(foundUser.getTokenVersion())
+                .build();
     }
 
     public void incrementTokenVersion(Long id) {
@@ -130,5 +138,22 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
 
         user.setTokenVersion(user.getTokenVersion() + 1);
+    }
+
+    @Override
+    public UserResponse getByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .map(userMapper::toDto)
+                .orElseThrow(() -> new ResourceNotFoundException("Not found by email " + email));
+    }
+
+    @Override
+    public UserResponse getCurrent(Jwt jwt) {
+        CurrentUserIdExtractor.UserId userId = currentUserIdExtractor.resolve(jwt);
+
+        return switch (userId) {
+            case CurrentUserIdExtractor.UserId.Numeric id -> get(id.value());
+            case CurrentUserIdExtractor.UserId.Subject email -> getByEmail(email.value());
+        };
     }
 }
